@@ -1,0 +1,21 @@
+[project]
+name = "persona-lens"
+version = "0.1.0"
+description = "CLI tool for generating persona analysis reports from X/Twitter profiles"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "httpx>=0.27",
+  "openai>=1.0",
+  "typer>=0.12",
+  "rich>=13.0",
+  "pydantic>=2.0",
+  "python-dotenv",
+]
+
+[project.scripts]
+persona-lens = "persona_lens.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
