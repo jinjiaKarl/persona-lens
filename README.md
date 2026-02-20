@@ -55,25 +55,30 @@ cp .env.example .env
 
 ## Usage
 
-Print report to terminal (default):
-
 ```bash
+# Print report to terminal (default)
 uv run persona-lens elonmusk
-uv run persona-lens @hasantoxr --tweets 40
-```
 
-Save to a Markdown file:
+# @ prefix is optional
+uv run persona-lens @elonmusk
 
-```bash
+# Fetch more tweets for a deeper analysis
+uv run persona-lens elonmusk --tweets 50
+
+# Save to a Markdown file instead of printing
 uv run persona-lens elonmusk --output report.md
+
+# Use click mode (clicks "Load more" button) instead of cursor-based pagination
+uv run persona-lens elonmusk --tweets 200 --mode click
 ```
 
 ### Options
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--tweets` / `-t` | `20` | Number of tweets to fetch |
-| `--output` / `-o` | — | Save report to file instead of printing to terminal |
+| `--tweets` / `-t` | `20` | Number of tweets to analyse |
+| `--output` / `-o` | — | Save report to a file instead of printing to terminal |
+| `--mode` / `-m` | `cursor` | Pagination mode: `cursor` (URL-based, faster) or `click` (clicks "Load more" button) |
 
 ## Report sections
 
@@ -88,6 +93,10 @@ Each report includes:
 - **Core Values** — values evident in posts
 - **Posting Activity** — day-of-week and time-of-day ASCII heatmaps (decoded from tweet timestamps, UTC) with psychological insights
 
+## Limitations
+
+**Tweet cap:** Nitter uses Twitter's unauthenticated guest token API, which limits how far back the timeline can be paginated. The exact number varies by Nitter instance and token pool health. Twitter's own timeline API supports deeper history for authenticated users, but Nitter's anonymous mode does not provide a logged-in session.
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -95,3 +104,7 @@ Each report includes:
 | `OPENAI_API_KEY` | — | Required |
 | `CAMOFOX_URL` | `http://localhost:9377` | Camofox Browser API URL |
 | `NITTER_INSTANCE` | `https://nitter.net` | Nitter instance to use. If unset, auto-detects a reachable instance from the [LibreRedirect list](https://github.com/libredirect/instances) |
+
+## License
+
+MIT © [jinjiaKarl](https://github.com/jinjiaKarl)

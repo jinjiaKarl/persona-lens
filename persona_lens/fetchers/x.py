@@ -54,10 +54,58 @@ def extract_activity(snapshot: str) -> tuple[dict[str, int], dict[str, int]]:
     return dict(days), dict(hours)
 
 
+def clean_snapshot(snapshot: str) -> str:
+    """Extract only meaningful text from an accessibility snapshot.
+
+    Keeps: bio (paragraph), tweet text lines, profile stats (listitem with numbers).
+    Drops: links, navigation, images, empty lines, pure engagement-stat numbers.
+    """
+    lines = []
+    for line in snapshot.splitlines():
+        stripped = line.strip()
+
+        if stripped.startswith("- paragraph:"):
+            content = stripped.removeprefix("- paragraph:").strip()
+
+        elif stripped.startswith("- text:"):
+            content = stripped.removeprefix("- text:").strip().strip('"')
+            # drop pure engagement stats: "310  1,051  10,435  1,587,908"
+            if re.fullmatch(r'[\d,\s]+', content):
+                continue
+
+        elif stripped.startswith("- listitem:"):
+            content = stripped.removeprefix("- listitem:").strip()
+            # keep only profile stats (e.g. "Tweets 72,419") — must have both word and digit
+            if not re.search(r'[A-Za-z]', content) or not re.search(r'\d', content):
+                continue
+
+        else:
+            continue
+
+        # remove Unicode private-use-area chars (Nitter uses them for action icons)
+        content = re.sub(r'[\ue000-\uf8ff]', '', content).strip()
+        # strip trailing engagement stats (icon-stripped form: "great post  3  1  493")
+        content = re.sub(r'(\s+[\d,]+){2,}\s*$', '', content).strip()
+        # drop anything with no letters — catches standalone stats, stray numbers
+        if content and re.search(r'[A-Za-z]', content):
+            lines.append(content)
+
+    return "\n".join(lines)
+
+
 def _extract_cursor(snapshot: str) -> str | None:
     """Extract the next-page cursor from the Nitter snapshot text."""
     cursors = re.findall(r'cursor=([^"&\s]+)', snapshot)
     return cursors[0] if cursors else None
+
+
+def _extract_load_more_ref(snapshot: str) -> str | None:
+    """Extract the element ref of the 'Load more' link from the Nitter snapshot.
+
+    Snapshot format: - link "Load more" [e175]:
+    """
+    match = re.search(r'link "Load more" \[(e\d+)\]', snapshot)
+    return match.group(1) if match else None
 
 
 def _resolve_nitter() -> str:
@@ -98,12 +146,14 @@ def _resolve_nitter() -> str:
     )
 
 
-def fetch_snapshot(username: str, tweet_count: int = 20) -> str:
+def fetch_snapshot(username: str, tweet_count: int = 20, mode: str = "cursor") -> str:
     """Fetch Nitter profile page snapshots via Camofox Browser REST API.
 
     Returns concatenated accessibility snapshot text from all pages needed
-    to accumulate at least `tweet_count` tweets. Uses Nitter cursor-based
-    pagination via POST /tabs/:id/navigate instead of clicking UI elements.
+    to accumulate at least `tweet_count` tweets.
+
+    mode="cursor" (default): navigates to next page via URL cursor parameter.
+    mode="click": clicks the 'Load more' button in the page DOM.
     """
     base_url = os.getenv("CAMOFOX_URL", "http://localhost:9377")
     nitter = _resolve_nitter()
@@ -133,19 +183,35 @@ def fetch_snapshot(username: str, tweet_count: int = 20) -> str:
                 snapshots.append(snap)
                 total_seen += _count_tweets(snap)
 
-                # 4. Stop if we have enough tweets or no cursor for next page
+                # 4. Stop if we have enough tweets
                 if total_seen >= tweet_count:
                     break
-                cursor = _extract_cursor(snap)
-                if not cursor:
-                    break
 
-                # 5. Navigate to next page using cursor
-                next_url = f"{nitter}/{username}?cursor={urllib.parse.quote(cursor, safe='')}"
-                client.post(f"/tabs/{tab_id}/navigate", json={
-                    "userId": SESSION_ID,
-                    "url": next_url,
-                })
+                # 5. Advance to next page
+                if mode == "click":
+                    ref = _extract_load_more_ref(snap)
+                    if not ref:
+                        break
+                    client.post(f"/tabs/{tab_id}/click", json={
+                        "userId": SESSION_ID,
+                        "ref": ref,
+                    })
+                    # Wait for the Load more button to reappear — this signals
+                    # new tweets have finished loading. If it never appears the
+                    # wait times out and the next snapshot will have no ref → stop.
+                    client.post(f"/tabs/{tab_id}/wait", json={
+                        "userId": SESSION_ID,
+                        "selector": 'a[href*="cursor="]',
+                    })
+                else:  # cursor (default)
+                    cursor = _extract_cursor(snap)
+                    if not cursor:
+                        break
+                    next_url = f"{nitter}/{username}?cursor={urllib.parse.quote(cursor, safe='')}"
+                    client.post(f"/tabs/{tab_id}/navigate", json={
+                        "userId": SESSION_ID,
+                        "url": next_url,
+                    })
         finally:
             # 6. Always clean up tab, even if an error occurs
             client.delete(f"/tabs/{tab_id}")
