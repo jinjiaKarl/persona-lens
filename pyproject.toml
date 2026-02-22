@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 persona-lens = "persona_lens.cli:app"
+persona-lens-agent = "persona_lens.agent.cli:app"
 
 [build-system]
 requires = ["hatchling"]
