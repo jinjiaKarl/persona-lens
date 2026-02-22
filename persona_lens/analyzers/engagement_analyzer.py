@@ -11,9 +11,11 @@ SYSTEM_PROMPT = """You are a social media analyst. Given engagement data for mul
 2. Whether specific messaging patterns (comparison, personal experience, data-driven) correlate with higher engagement
 3. Cross-account patterns
 
+All output must be in English only.
+
 Return JSON with key "result" containing:
-- insights: 2-3 sentence summary of key findings
-- patterns: list of {type, description} objects (type: "product_type" | "messaging" | "timing")"""
+- insights: 2-3 sentence summary of key findings (English only)
+- patterns: list of {type, description} objects (type: "product_type" | "messaging" | "timing", description in English only)"""
 
 
 def find_engagement_patterns(all_user_data: dict[str, Any]) -> dict[str, Any]:

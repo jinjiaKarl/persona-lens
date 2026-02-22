@@ -10,10 +10,12 @@ SYSTEM_PROMPT = """You are a content strategy expert. Given a list of content br
 
 For each brief, return which users best fit based on their writing style, tone, and past product mentions.
 
+All output must be in English only.
+
 Return JSON with key "matches" containing a list of:
 - brief: the content brief text
 - matched_users: list of usernames (best fit first, max 3)
-- reason: 1-2 sentence explanation of why they fit"""
+- reason: 1-2 sentence explanation of why they fit (English only)"""
 
 
 def match_content_briefs(

@@ -10,10 +10,11 @@ SYSTEM_PROMPT = """You are a product intelligence analyst. Given a list of tweet
 
 For each product found, return a JSON array with objects:
 - product: product name (string)
-- category: one of "AI工具-编程", "AI工具-写作", "AI工具-图像", "AI工具-视频", "AI工具-Agent", "SaaS工具", "硬件/消费电子", "开发工具", "其他"
+- category: one of "AI-Coding", "AI-Writing", "AI-Image", "AI-Video", "AI-Agent", "SaaS", "Hardware/Consumer Electronics", "Dev Tools", "Other"
 - tweet_ids: list of tweet IDs that mention this product
 
 Only include actual products/tools/services. Ignore vague references.
+All output must be in English only.
 Return JSON with key 'products' containing the array."""
 
 
