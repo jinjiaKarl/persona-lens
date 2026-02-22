@@ -10,15 +10,19 @@ def format_agent_report(result: dict[str, Any]) -> str:
 
     sections = [f"# KOL Batch Analysis Report\n\n*Generated {date.today()}*\n"]
 
-    if engagement:
+    if engagement and isinstance(engagement, dict):
         sections.append("## Insights\n")
         sections.append(engagement.get("insights", "") + "\n")
         patterns = engagement.get("patterns", [])
         if patterns:
             sections.append("\n**Key patterns:**\n")
             for p in patterns:
-                sections.append(f"- **{p.get('type', '')}**: {p.get('description', '')}")
+                if isinstance(p, dict):
+                    sections.append(f"- **{p.get('type', '')}**: {p.get('description', '')}")
         sections.append("")
+    elif engagement and isinstance(engagement, str):
+        sections.append("## Insights\n")
+        sections.append(engagement + "\n")
 
     sections.append("## Per-Account Analysis\n")
     for username, data in users.items():

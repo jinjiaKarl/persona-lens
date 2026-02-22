@@ -42,4 +42,8 @@ def find_engagement_patterns(all_user_data: dict[str, Any]) -> dict[str, Any]:
         ],
     )
     data = json.loads(response.choices[0].message.content)
-    return data.get("result", data)
+    result = data.get("result", data)
+    # Guard: if LLM returned result as a plain string, wrap it
+    if isinstance(result, str):
+        return {"insights": result, "patterns": []}
+    return result
