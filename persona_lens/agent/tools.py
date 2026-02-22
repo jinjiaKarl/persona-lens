@@ -1,14 +1,18 @@
-"""Tool registry: OpenAI function schemas + Python function mapping."""
-import json
+"""Tool registry: OpenAI function schemas + Python function mapping.
+
+Only fetch_user_tweets and extract_and_analyze_user are exposed as LLM tools.
+find_engagement_patterns and match_content_briefs are called directly by
+agent/core.py after the LLM loop completes — avoiding large data serialization
+through LLM tool arguments.
+"""
 from typing import Any
 
 from persona_lens.fetchers.x import fetch_snapshot
 from persona_lens.fetchers.tweet_parser import extract_tweet_data
 from persona_lens.fetchers.patterns import compute_posting_patterns
 from persona_lens.analyzers.product_analyzer import analyze_products
-from persona_lens.analyzers.engagement_analyzer import find_engagement_patterns
-from persona_lens.analyzers.content_matcher import match_content_briefs
 
+# Tools exposed to the LLM — only the per-user fetch+analyze pair
 TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -40,35 +44,6 @@ TOOL_SCHEMAS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "find_engagement_patterns",
-            "description": "Analyze high-engagement posts across all fetched users to find product and messaging patterns. Call after all users are analyzed.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "user_data_json": {"type": "string", "description": "JSON string of all_user_data dict"},
-                },
-                "required": ["user_data_json"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "match_content_briefs",
-            "description": "Match content direction briefs to best-fit influencers. Call after engagement patterns are found.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "briefs_json": {"type": "string", "description": "JSON array of brief strings"},
-                    "profiles_json": {"type": "string", "description": "JSON dict of user profiles"},
-                },
-                "required": ["briefs_json", "profiles_json"],
-            },
-        },
-    },
 ]
 
 
@@ -89,20 +64,7 @@ def _extract_and_analyze_user(username: str, snapshot: str) -> dict[str, Any]:
     }
 
 
-def _find_engagement_patterns(user_data_json: str) -> dict[str, Any]:
-    all_user_data = json.loads(user_data_json)
-    return find_engagement_patterns(all_user_data)
-
-
-def _match_content_briefs(briefs_json: str, profiles_json: str) -> list[dict[str, Any]]:
-    briefs = json.loads(briefs_json)
-    profiles = json.loads(profiles_json)
-    return match_content_briefs(briefs, profiles)
-
-
 TOOL_FUNCTIONS: dict[str, Any] = {
     "fetch_user_tweets": _fetch_user_tweets,
     "extract_and_analyze_user": _extract_and_analyze_user,
-    "find_engagement_patterns": _find_engagement_patterns,
-    "match_content_briefs": _match_content_briefs,
 }
