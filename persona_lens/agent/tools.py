@@ -1,9 +1,10 @@
 """Tool registry: OpenAI function schemas + Python function mapping.
 
-Only fetch_user_tweets and extract_and_analyze_user are exposed as LLM tools.
-find_engagement_patterns and match_content_briefs are called directly by
-agent/core.py after the LLM loop completes — avoiding large data serialization
-through LLM tool arguments.
+Single tool exposed to the LLM: fetch_and_analyze_user.
+
+The raw Nitter snapshot never enters the LLM context — it is fetched,
+parsed into structured JSON, and analyzed entirely within Python. The LLM
+only receives a compact summary (~100 tokens) as the tool result.
 """
 from typing import Any
 
@@ -12,13 +13,16 @@ from persona_lens.fetchers.tweet_parser import extract_tweet_data
 from persona_lens.fetchers.patterns import compute_posting_patterns
 from persona_lens.analyzers.product_analyzer import analyze_products
 
-# Tools exposed to the LLM — only the per-user fetch+analyze pair
 TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "fetch_user_tweets",
-            "description": "Fetch raw tweet snapshot for a single X/Twitter user via Nitter.",
+            "name": "fetch_and_analyze_user",
+            "description": (
+                "Fetch tweets for one X/Twitter user, extract structured data "
+                "(tweet text, likes, retweets, timestamps), compute posting patterns, "
+                "and identify product mentions. Call once per username."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -29,42 +33,45 @@ TOOL_SCHEMAS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "extract_and_analyze_user",
-            "description": "Parse raw snapshot into structured tweets, compute posting patterns, and extract product mentions. Call this after fetch_user_tweets.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "username": {"type": "string"},
-                    "snapshot": {"type": "string", "description": "Raw snapshot from fetch_user_tweets"},
-                },
-                "required": ["username", "snapshot"],
-            },
-        },
-    },
 ]
 
 
-def _fetch_user_tweets(username: str, tweet_count: int = 30) -> dict[str, Any]:
+def _fetch_and_analyze_user(username: str, tweet_count: int = 30) -> dict[str, Any]:
+    """Fetch + parse + analyze a single user entirely in Python.
+
+    The raw snapshot never leaves this function.
+    Returns structured data stored by the agent core; returns a compact
+    summary to the LLM context.
+    """
     snapshot = fetch_snapshot(username, tweet_count=tweet_count)
-    return {"username": username, "snapshot": snapshot}
-
-
-def _extract_and_analyze_user(username: str, snapshot: str) -> dict[str, Any]:
     tweets = extract_tweet_data(snapshot)
     patterns = compute_posting_patterns(tweets)
     products = analyze_products(username, tweets)
-    return {
+
+    # Full structured result (kept internally by agent core)
+    full = {
         "username": username,
         "tweets": tweets,
         "patterns": patterns,
         "products": products,
     }
 
+    # Compact summary returned to LLM (avoids token bloat)
+    peak_days = patterns.get("peak_days", {})
+    peak_hours = patterns.get("peak_hours", {})
+    top_day = max(peak_days, key=peak_days.get) if peak_days else "N/A"
+    top_hour = max(peak_hours, key=peak_hours.get) if peak_hours else "N/A"
+    summary = {
+        "username": username,
+        "tweets_parsed": len(tweets),
+        "peak_day": top_day,
+        "peak_hour_utc": top_hour,
+        "products_found": [p["product"] for p in products[:5]],
+    }
+
+    return {"_full": full, "_summary": summary}
+
 
 TOOL_FUNCTIONS: dict[str, Any] = {
-    "fetch_user_tweets": _fetch_user_tweets,
-    "extract_and_analyze_user": _extract_and_analyze_user,
+    "fetch_and_analyze_user": _fetch_and_analyze_user,
 }
