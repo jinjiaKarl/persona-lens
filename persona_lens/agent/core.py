@@ -14,6 +14,7 @@ from typing import Any
 from openai import OpenAI
 
 from persona_lens.agent.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS
+from persona_lens.analyzers.product_analyzer import analyze_products
 from persona_lens.analyzers.engagement_analyzer import find_engagement_patterns
 from persona_lens.analyzers.content_matcher import match_content_briefs
 
@@ -81,6 +82,9 @@ def run_agent(
                 })
 
     # Phase 2: direct Python calls — full structured data, no LLM serialization
+    for username, data in all_user_data.items():
+        data["products"] = analyze_products(username, data["tweets"])
+
     engagement_result: dict[str, Any] = {}
     if all_user_data:
         engagement_result = find_engagement_patterns(all_user_data)

@@ -11,7 +11,6 @@ from typing import Any
 from persona_lens.fetchers.x import fetch_snapshot
 from persona_lens.fetchers.tweet_parser import extract_tweet_data
 from persona_lens.fetchers.patterns import compute_posting_patterns
-from persona_lens.analyzers.product_analyzer import analyze_products
 
 TOOL_SCHEMAS = [
     {
@@ -46,14 +45,12 @@ def _fetch_and_analyze_user(username: str, tweet_count: int = 30) -> dict[str, A
     snapshot = fetch_snapshot(username, tweet_count=tweet_count)
     tweets = extract_tweet_data(snapshot)
     patterns = compute_posting_patterns(tweets)
-    products = analyze_products(username, tweets)
 
     # Full structured result (kept internally by agent core)
     full = {
         "username": username,
         "tweets": tweets,
         "patterns": patterns,
-        "products": products,
     }
 
     # Compact summary returned to LLM (avoids token bloat)
@@ -66,7 +63,6 @@ def _fetch_and_analyze_user(username: str, tweet_count: int = 30) -> dict[str, A
         "tweets_parsed": len(tweets),
         "peak_day": top_day,
         "peak_hour_utc": top_hour,
-        "products_found": [p["product"] for p in products[:5]],
     }
 
     return {"_full": full, "_summary": summary}
