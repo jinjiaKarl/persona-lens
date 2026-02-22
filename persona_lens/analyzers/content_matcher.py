@@ -4,6 +4,8 @@ from typing import Any
 
 from openai import OpenAI
 
+from persona_lens.utils import llm_call_with_retry
+
 SYSTEM_PROMPT = """You are a content strategy expert. Given a list of content briefs and influencer profiles, match each brief to the most suitable influencers.
 
 For each brief, return which users best fit based on their writing style, tone, and past product mentions.
@@ -28,7 +30,8 @@ def match_content_briefs(
     briefs_text = "\n".join(f"- {b}" for b in briefs)
     user_content = f"Content briefs:\n{briefs_text}\n\nInfluencer profiles:\n{profile_text}"
 
-    response = client.chat.completions.create(
+    response = llm_call_with_retry(
+        client.chat.completions.create,
         model="gpt-4o",
         response_format={"type": "json_object"},
         messages=[

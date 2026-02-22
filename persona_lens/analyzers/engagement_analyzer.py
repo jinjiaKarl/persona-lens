@@ -4,6 +4,8 @@ from typing import Any
 
 from openai import OpenAI
 
+from persona_lens.utils import llm_call_with_retry
+
 SYSTEM_PROMPT = """You are a social media analyst. Given engagement data for multiple KOL accounts, identify:
 1. Which product types drive the highest engagement
 2. Whether specific messaging patterns (comparison, personal experience, data-driven) correlate with higher engagement
@@ -28,7 +30,8 @@ def find_engagement_patterns(all_user_data: dict[str, Any]) -> dict[str, Any]:
             summary_lines.append(f"  [{t['likes']}L {t['retweets']}RT] {t['text'][:120]}")
         summary_lines.append(f"  Products mentioned: {[p['product'] for p in products]}")
 
-    response = client.chat.completions.create(
+    response = llm_call_with_retry(
+        client.chat.completions.create,
         model="gpt-4o",
         response_format={"type": "json_object"},
         messages=[

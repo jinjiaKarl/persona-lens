@@ -4,6 +4,8 @@ from typing import Any
 
 from openai import OpenAI
 
+from persona_lens.utils import llm_call_with_retry
+
 SYSTEM_PROMPT = """You are a product intelligence analyst. Given a list of tweets, extract all product or tool mentions.
 
 For each product found, return a JSON array with objects:
@@ -27,7 +29,8 @@ def analyze_products(username: str, tweets: list[dict[str, Any]]) -> list[dict[s
     )
     user_content = f"Tweets from @{username}:\n\n{tweet_lines}"
 
-    response = client.chat.completions.create(
+    response = llm_call_with_retry(
+        client.chat.completions.create,
         model="gpt-4o",
         response_format={"type": "json_object"},
         messages=[
