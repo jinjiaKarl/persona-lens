@@ -8,7 +8,7 @@ from persona_lens.agent.context import AgentContext
 from persona_lens.platforms.x.fetcher import fetch_snapshot
 from persona_lens.platforms.x.parser import extract_tweet_data, extract_user_info
 from persona_lens.utils.patterns import compute_posting_patterns
-from persona_lens.analyzers.profile import analyze_user_profile
+from persona_lens.platforms.x.analyzer import analyze_user_profile
 
 console = Console()
 
