@@ -8,12 +8,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install dependencies
 uv sync
 
-# Run the CLI
-uv run persona-lens <username>
-uv run persona-lens <username> --tweets 40 --output report.md
+# Start the interactive agent
+uv run persona-lens
+uv run persona-lens --tweets 50
+
+# Run tests
+uv run pytest tests/ -v
 
 # Run a quick import/smoke check
-uv run python -c "from persona_lens.fetchers.x import fetch_snapshot; print('ok')"
+uv run python -c "from persona_lens.agent.loop import run_interactive_loop; print('ok')"
 
 # Clean up stale Camofox Browser tabs (if hitting 429s)
 uv run python -c "
@@ -34,16 +37,23 @@ Two external services must be running:
 ## Architecture
 
 ```
-CLI (cli.py)
-  → fetch_snapshot()        fetchers/x.py     — Camofox Browser REST API → Nitter page
-  → extract_activity()      fetchers/x.py     — snowflake ID decode → day + time-slot counts
-  → analyze()               analyzers/openai_analyzer.py  — snapshot + activity → PersonaReport
-  → format_report()         formatters/markdown.py        — PersonaReport → Markdown string
+agent/cli.py              — Typer CLI entry point (no subcommands)
+agent/loop.py             — Interactive agent loop (OpenAI Agents SDK)
+  ├─ Main Agent           — general Q&A + WebSearch, hands off KOL tasks
+  └─ KOL Analysis Agent   — specialist with two tools:
+       ├─ fetch_user       — fetch snapshot → parse tweets → compute patterns (pure Python)
+       └─ analyze_user     — run Profile Analyzer sub-agent (GPT-4o)
+fetchers/x.py             — Camofox Browser REST API → Nitter page
+fetchers/tweet_parser.py  — snapshot → structured tweets + user info
+fetchers/patterns.py      — tweet timestamps → posting patterns
+analyzers/user_profile_analyzer.py  — GPT-4o sub-agent → products, style, engagement
 ```
 
-**Data flow:** The CLI fetches an accessibility snapshot (plain text tree, not HTML) from Nitter via Camofox Browser, decodes tweet timestamps locally from Twitter snowflake IDs, passes both to OpenAI in a single call, and renders the result as Markdown.
+**Data flow:** The agent fetches an accessibility snapshot (plain text tree) from Nitter via Camofox Browser, parses it into structured tweet data (text, engagement stats, media, timestamps), computes posting patterns locally, then sends the structured data to a Profile Analyzer sub-agent for product extraction, writing style analysis, and engagement insights. Raw snapshots never enter the LLM context.
 
-**`PersonaReport`** (`models.py`) is the central Pydantic model. Fields `posting_days` and `posting_hours` are populated locally before being passed to `analyze()`; all other fields come from the OpenAI JSON response.
+**Two-tool design:** `fetch_user` is pure Python (no LLM cost), `analyze_user` triggers one LLM call per user via a sub-agent.
+
+**Caching:** Analyzed users are stored in `AgentContext` across conversation turns — same user is never re-fetched or re-analyzed.
 
 ## Key Implementation Details
 
@@ -54,16 +64,16 @@ CLI (cli.py)
 - `POST /tabs/:id/navigate` with `{"url": "..."}` for cursor-based pagination
 - `DELETE /tabs/:id` in a `finally` block — always clean up or sessions hit a tab limit (429)
 
+**Tweet parsing** (`extract_tweet_data`): Detects tweets by bare-link anchors (`- link [eN]:` + `/url: /user/status/ID#m`), separates TOC anchors from content anchors, then parses each block for: author, text, engagement stats (replies, retweets, likes, views), media URLs, quoted text, and relative time. Falls back to a simpler pattern for non-standard snapshots.
+
+**User info** (`extract_user_info`): Extracts display name, bio, joined date, followers, following, tweets count from the snapshot header.
+
+**Author filtering:** `fetch_user` in `loop.py` filters out tweets where the author handle doesn't match the target username, removing retweets from other users.
+
 **Nitter pagination** uses cursor query params extracted from the snapshot (`cursor=...` regex), not "Load more" clicks.
 
 **Snowflake decoding**: `ts_ms = (tweet_id >> 22) + 1288834974657`. All times are UTC — no timezone conversion is performed.
 
 **Nitter instance resolution** (`_resolve_nitter`): env var → probe `nitter.net` → fallback to LibreRedirect community list at `https://raw.githubusercontent.com/libredirect/instances/main/data.json`.
 
-## README Correction
-
-The README shows `uv run persona-lens analyze @elonmusk` but the CLI has a single command (no subcommand). Correct usage is:
-
-```bash
-uv run persona-lens elonmusk
-```
+**Profile Analyzer sub-agent** (`user_profile_analyzer.py`): Uses OpenAI Agents SDK with Pydantic `output_type=UserProfile` for structured output. Returns: products (with AI-inferred categories), writing style, engagement insights and top posts.
