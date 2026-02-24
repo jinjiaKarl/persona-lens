@@ -1,4 +1,4 @@
-from persona_lens.fetchers.tweet_parser import extract_tweet_data, _parse_stats_from_text
+from persona_lens.platforms.x.parser import extract_tweet_data, _parse_stats_from_text
 
 # ── Realistic Nitter snapshot with proper structure ──────────────────────────
 # Structure: TOC anchors at top, then content blocks each starting with a bare-link anchor
