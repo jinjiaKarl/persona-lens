@@ -10,13 +10,14 @@ dependencies = [
   "typer>=0.12",
   "rich>=13.0",
   "pydantic>=2.0",
+  "openai-agents==0.9.2",
+  "prompt-toolkit>=3.0",
   "python-dotenv",
   "pytest>=8.0",
 ]
 
 [project.scripts]
-persona-lens = "persona_lens.cli:app"
-persona-lens-agent = "persona_lens.agent.cli:app"
+persona-lens = "persona_lens.agent.cli:app"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,32 +1,54 @@
-"""Unified per-user profile analyzer: products + engagement in one LLM call."""
-import json
-import os
+"""Unified per-user profile analyzer: products + engagement via a dedicated sub-agent."""
 from typing import Any
 
-from openai import OpenAI
+from agents import Agent, Runner
+from pydantic import BaseModel
 
-from persona_lens.utils import llm_call_with_retry
 
-SYSTEM_PROMPT = """You are a KOL analyst. Given tweets from a single user, perform a comprehensive profile analysis.
+class ProductItem(BaseModel):
+    product: str
+    category: str
+    tweet_ids: list[str]
+
+
+class TopPost(BaseModel):
+    text: str
+    likes: int
+    retweets: int
+
+
+class Engagement(BaseModel):
+    top_posts: list[TopPost]
+    insights: str
+
+
+class UserProfile(BaseModel):
+    products: list[ProductItem]
+    writing_style: str
+    engagement: Engagement
+
+
+_INSTRUCTIONS = """You are a KOL analyst. Given tweets from a single user, perform a comprehensive profile analysis.
 
 All output must be in English only.
 
-Return JSON with key "profile" containing:
-- products: list of {product, category, tweet_ids} objects
-  category: infer the most appropriate category from context (e.g. "AI-Coding", "Hardware", "SaaS", etc.)
-  Only include actual products/tools/services. Ignore vague references.
-- writing_style: 2-3 sentence description of this user's writing style — tone, vocabulary, format preferences, and how they typically communicate with their audience.
-- engagement: object with:
-    top_posts: top 3 tweets by engagement, each {text, likes, retweets}
-    insights: 1-2 sentence summary of what content or products drive the most engagement for this user"""
+Analyze and return:
+- products: list of products/tools/services mentioned. Each has: product name, category (infer from context, e.g. "AI-Coding", "Hardware", "SaaS"), and tweet_ids. Only include actual products — ignore vague references.
+- writing_style: 2-3 sentence description of tone, vocabulary, format preferences, and how they communicate with their audience.
+- engagement: top 3 tweets by engagement (text, likes, retweets) and a 1-2 sentence insight on what drives the most engagement."""
+
+profile_analyzer_agent = Agent(
+    name="Profile Analyzer",
+    instructions=_INSTRUCTIONS,
+    model="gpt-4o",
+    output_type=UserProfile,
+)
 
 
-def analyze_user_profile(username: str, tweets: list[dict[str, Any]]) -> dict[str, Any]:
-    """Single LLM call: extract products + engagement insights for one user."""
+async def analyze_user_profile(username: str, tweets: list[dict[str, Any]]) -> dict[str, Any]:
+    """Run the profile analyzer sub-agent and return a plain dict."""
     if not tweets:
         return {"products": [], "writing_style": "", "engagement": {"top_posts": [], "insights": ""}}
-
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     tweet_lines = "\n".join(
         f'[ID:{t["id"]}] [{t.get("likes", 0)}L {t.get("retweets", 0)}RT] {t["text"]}'
@@ -34,17 +56,5 @@ def analyze_user_profile(username: str, tweets: list[dict[str, Any]]) -> dict[st
     )
     user_content = f"@{username} tweets ({len(tweets)} total):\n\n{tweet_lines}"
 
-    response = llm_call_with_retry(
-        client.chat.completions.create,
-        model="gpt-4o",
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
-    )
-    data = json.loads(response.choices[0].message.content)
-    profile = data.get("profile", data)
-    if isinstance(profile, str):
-        return {"products": [], "engagement": {"top_posts": [], "insights": profile}}
-    return profile
+    result = await Runner.run(profile_analyzer_agent, input=user_content)
+    return result.final_output.model_dump()

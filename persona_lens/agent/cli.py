@@ -2,13 +2,13 @@ import typer
 from dotenv import load_dotenv
 
 load_dotenv()
-app = typer.Typer()
+app = typer.Typer(invoke_without_command=True)
 
 
-@app.command()
-def chat(
+@app.callback()
+def main(
     tweets: int = typer.Option(30, "--tweets", "-t", help="Default tweets to fetch per account"),
 ):
-    """Start an interactive KOL analysis agent."""
+    """Interactive KOL analysis agent for X/Twitter profiles."""
     from persona_lens.agent.loop import run_interactive_loop
     run_interactive_loop(tweet_count=tweets)

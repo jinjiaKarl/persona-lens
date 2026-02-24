@@ -217,3 +217,6 @@ def fetch_snapshot(username: str, tweet_count: int = 20, mode: str = "cursor") -
             client.delete(f"/tabs/{tab_id}")
 
     return "\n\n--- PAGE BREAK ---\n\n".join(snapshots)
+
+if __name__ == "__main__":
+    print(fetch_snapshot("hasantoxr"))

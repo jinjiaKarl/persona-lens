@@ -1,13 +1,14 @@
 # persona-lens
 
-CLI tool that generates a structured persona analysis report from any X (Twitter) profile.
+Interactive AI agent for analyzing X (Twitter) KOL (Key Opinion Leader) profiles through conversation.
 
 ## How it works
 
-1. Fetches the public profile and recent tweets via Nitter using [Camofox Browser](https://github.com/jo-inc/camofox-browser) (anti-detection Firefox automation)
-2. Decodes tweet timestamps from Twitter snowflake IDs to compute posting activity patterns
-3. Sends the page snapshot + activity data to OpenAI GPT-4o for analysis
-4. Outputs a Markdown report with personality traits, writing style, interests, expertise, values, and an activity heatmap
+1. You start a chat session and ask the agent to analyze any X/Twitter account
+2. The agent fetches tweets via Nitter using [Camofox Browser](https://github.com/jo-inc/camofox-browser) (anti-detection Firefox automation)
+3. Tweets are parsed into structured data — text, engagement stats, media, timestamps (decoded from Twitter snowflake IDs)
+4. A profile analyzer (GPT-4o) extracts products mentioned, writing style, and engagement insights
+5. You can ask follow-up questions, compare accounts, or request new analyses — all in one session
 
 ## Requirements
 
@@ -20,8 +21,6 @@ CLI tool that generates a structured persona analysis report from any X (Twitter
 
 ### 1. Start Camofox Browser
 
-Camofox Browser is a Node.js service that wraps Camoufox (anti-detection Firefox) behind an HTTP API. It must be running before you use persona-lens.
-
 ```bash
 git clone https://github.com/jo-inc/camofox-browser
 cd camofox-browser
@@ -31,11 +30,9 @@ npm start
 
 The service starts on port 9377 and downloads Camoufox (~300MB) on first run.
 
-Alternatively, build and run with Docker:
+Or use Docker:
 
 ```bash
-git clone https://github.com/jo-inc/camofox-browser
-cd camofox-browser
 docker build -t camofox-browser .
 docker run -p 9377:9377 camofox-browser
 ```
@@ -56,46 +53,60 @@ cp .env.example .env
 ## Usage
 
 ```bash
-# Print report to terminal (default)
-uv run persona-lens elonmusk
+# Start the interactive agent
+uv run persona-lens
 
-# @ prefix is optional
-uv run persona-lens @elonmusk
-
-# Fetch more tweets for a deeper analysis
-uv run persona-lens elonmusk --tweets 50
-
-# Save to a Markdown file instead of printing
-uv run persona-lens elonmusk --output report.md
-
-# Use click mode (clicks "Load more" button) instead of cursor-based pagination
-uv run persona-lens elonmusk --tweets 200 --mode click
+# Fetch more tweets per account (default: 30)
+uv run persona-lens --tweets 50
 ```
 
-### Options
+### Example session
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--tweets` / `-t` | `20` | Number of tweets to analyse |
-| `--output` / `-o` | — | Save report to a file instead of printing to terminal |
-| `--mode` / `-m` | `cursor` | Pagination mode: `cursor` (URL-based, faster) or `click` (clicks "Load more" button) |
+```
+KOL Analysis Agent (type 'exit' to quit)
 
-## Report sections
+You: Analyze @karpathy and @sama
+  → Fetching @karpathy...
+  → Analyzing @karpathy...
+  → Fetching @sama...
+  → Analyzing @sama...
 
-Each report includes:
+Agent: Here's what I found...
 
-- **Summary** — 2–3 sentence persona overview
-- **Personality Traits** — inferred from writing style and content
-- **Communication Style** — tone and formality
-- **Writing Style** — vocabulary, structure, humor, emoji usage
-- **Interests** — topics frequently discussed
-- **Areas of Expertise** — domains with demonstrated knowledge
-- **Core Values** — values evident in posts
-- **Posting Activity** — day-of-week and time-of-day ASCII heatmaps (decoded from tweet timestamps, UTC) with psychological insights
+You: Which one mentions more AI coding tools?
+Agent: (answers from cached data — no re-fetching)
+
+You: Now analyze @yaborosk
+  → Fetching @yaborosk...
+  → Analyzing @yaborosk...
+
+Agent: ...
+```
+
+### What the agent extracts per account
+
+- **Profile info** — bio, followers, following, tweet count
+- **Products mentioned** — with AI-inferred categories
+- **Writing style** — tone, vocabulary, format preferences
+- **Engagement insights** — top posts and what drives engagement
+- **Posting patterns** — peak days and hours (UTC)
+
+## Architecture
+
+```
+agent/cli.py          — Typer CLI entry point
+agent/loop.py         — Interactive agent loop (OpenAI Agents SDK)
+  ├─ fetch_user       — tool: fetch snapshot → parse tweets → compute patterns
+  └─ analyze_user     — tool: run profile analyzer sub-agent
+fetchers/x.py         — Camofox Browser REST API → Nitter page
+fetchers/tweet_parser.py  — snapshot → structured tweets + user info
+fetchers/patterns.py      — tweet timestamps → posting patterns
+analyzers/user_profile_analyzer.py  — GPT-4o sub-agent → products, style, engagement
+```
 
 ## Limitations
 
-**Tweet cap:** Nitter uses Twitter's unauthenticated guest token API, which limits how far back the timeline can be paginated. The exact number varies by Nitter instance and token pool health. Twitter's own timeline API supports deeper history for authenticated users, but Nitter's anonymous mode does not provide a logged-in session.
+**Tweet cap:** Nitter uses Twitter's unauthenticated guest token API, which limits how far back the timeline can be paginated. The exact number varies by Nitter instance and token pool health.
 
 ## Environment variables
 
@@ -103,7 +114,7 @@ Each report includes:
 |----------|---------|-------------|
 | `OPENAI_API_KEY` | — | Required |
 | `CAMOFOX_URL` | `http://localhost:9377` | Camofox Browser API URL |
-| `NITTER_INSTANCE` | `https://nitter.net` | Nitter instance to use. If unset, auto-detects a reachable instance from the [LibreRedirect list](https://github.com/libredirect/instances) |
+| `NITTER_INSTANCE` | `https://nitter.net` | Nitter instance to use. If unset, auto-detects from the [LibreRedirect list](https://github.com/libredirect/instances) |
 
 ## License
 

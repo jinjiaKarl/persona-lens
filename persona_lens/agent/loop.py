@@ -1,59 +1,101 @@
-"""Interactive agent loop: conversational KOL analysis."""
+"""Interactive agent loop: conversational KOL analysis powered by OpenAI Agents SDK."""
+
+import asyncio
 import json
-import os
+from dataclasses import dataclass, field
 from typing import Any
 
-from openai import OpenAI
+from agents import Agent, Runner, RunContextWrapper, WebSearchTool, function_tool
+from openai.types.responses import ResponseTextDeltaEvent
+from prompt_toolkit import PromptSession
 from rich.console import Console
-from rich.markdown import Markdown
 
 from persona_lens.fetchers.x import fetch_snapshot
-from persona_lens.fetchers.tweet_parser import extract_tweet_data
+from persona_lens.fetchers.tweet_parser import extract_tweet_data, extract_user_info
 from persona_lens.fetchers.patterns import compute_posting_patterns
 from persona_lens.analyzers.user_profile_analyzer import analyze_user_profile
 
 console = Console()
 
-SYSTEM_PROMPT = """You are a KOL (Key Opinion Leader) analysis agent for X/Twitter.
+MAIN_SYSTEM_PROMPT = """You are a helpful assistant.
+- For general questions, use web_search to find up-to-date information.
+- When the user asks to analyze an X/Twitter account or user, hand off to the KOL Analysis Agent.
+- Always reply in English."""
 
-You have one tool: fetch_and_analyze_user — use it to fetch and analyze a user's tweets.
+KOL_SYSTEM_PROMPT = """You are a KOL (Key Opinion Leader) analysis agent for X/Twitter.
 
-Guidelines:
-- When the user asks to analyze accounts, call the tool for each one.
-- Once a user is analyzed, their data is in the conversation history — do NOT re-fetch them.
-- Answer follow-up questions directly from the conversation context.
-- Be concise and insightful.
-- Reply in the same language as the user."""
-
-TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "fetch_and_analyze_user",
-            "description": (
-                "Fetch tweets for an X/Twitter user, extract structured data, "
-                "compute posting patterns, and analyze products + engagement. "
-                "Call once per username. Do not call again for already-analyzed users."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "username": {"type": "string", "description": "X username without @"},
-                    "tweet_count": {"type": "integer", "description": "Number of tweets to fetch", "default": 30},
-                },
-                "required": ["username"],
-            },
-        },
-    },
-]
+Tools: fetch_user (call first), then analyze_user.
+- To analyze an account: call fetch_user, then analyze_user.
+- Once analyzed, data is cached — do NOT re-fetch.
+- Always reply in English."""
 
 
-def _fetch_and_analyze_user(username: str, tweet_count: int = 30) -> dict[str, Any]:
-    """Full pipeline for one user. Returns full data + compact LLM summary."""
-    snapshot = fetch_snapshot(username, tweet_count=tweet_count)
-    tweets = extract_tweet_data(snapshot)
+@dataclass
+class AgentContext:
+    tweet_cache: dict[str, dict] = field(default_factory=dict)
+    analyzed_users: dict[str, Any] = field(default_factory=dict)
+    tweet_count: int = 30
+
+
+@function_tool
+def fetch_user(
+    ctx: RunContextWrapper[AgentContext],
+    username: str,
+    tweet_count: int = 30,
+) -> str:
+    """Fetch and cache tweets for an X/Twitter user. Must be called before analyze_user.
+
+    Args:
+        username: X username without @
+        tweet_count: Number of tweets to fetch
+    """
+    username = username.lstrip("@")
+    if username in ctx.context.tweet_cache:
+        n = len(ctx.context.tweet_cache[username]["tweets"])
+        return f"Already fetched {n} tweets for @{username}."
+
+    console.print(f"  [dim]→ Fetching @{username}...[/]")
+    count = tweet_count or ctx.context.tweet_count
+    snapshot = fetch_snapshot(username, tweet_count=count)
+    all_tweets = extract_tweet_data(snapshot)
+    # Keep only tweets authored by this user (filter out retweets from others)
+    tweets = [
+        t for t in all_tweets
+        if t.get("author") is None or t["author"].lstrip("@").lower() == username.lower()
+    ]
+    console.print_json(data=tweets)
+    user_info = extract_user_info(snapshot, username)
     patterns = compute_posting_patterns(tweets)
-    profile = analyze_user_profile(username, tweets)
+    ctx.context.tweet_cache[username] = {"tweets": tweets, "patterns": patterns, "user_info": user_info}
+    return f"Fetched {len(tweets)} tweets for @{username}. Call analyze_user next."
+
+
+@function_tool
+async def analyze_user(
+    ctx: RunContextWrapper[AgentContext],
+    username: str,
+) -> str:
+    """Analyze a previously fetched user's tweets: products, writing style, engagement.
+    Requires fetch_user to be called first.
+
+    Args:
+        username: X username without @
+    """
+    username = username.lstrip("@")
+
+    if username in ctx.context.analyzed_users:
+        result = {**ctx.context.analyzed_users[username], "note": "cached — already analyzed"}
+        return json.dumps(result, ensure_ascii=False)
+
+    cached = ctx.context.tweet_cache.get(username)
+    if not cached:
+        return f"No tweets cached for @{username}. Call fetch_user first."
+
+    console.print(f"  [dim]→ Analyzing @{username}...[/]")
+    tweets = cached["tweets"]
+    patterns = cached["patterns"]
+    user_info = cached.get("user_info", {})
+    profile = await analyze_user_profile(username, tweets)
 
     peak_days = patterns.get("peak_days", {})
     peak_hours = patterns.get("peak_hours", {})
@@ -62,15 +104,13 @@ def _fetch_and_analyze_user(username: str, tweet_count: int = 30) -> dict[str, A
     products = profile.get("products", [])
     engagement = profile.get("engagement", {})
 
-    full = {
-        "username": username,
-        "tweets": tweets,
-        "patterns": patterns,
-        "products": products,
-        "engagement": engagement,
-    }
     summary = {
         "username": username,
+        "display_name": user_info.get("display_name", ""),
+        "bio": user_info.get("bio", ""),
+        "followers": user_info.get("followers", 0),
+        "following": user_info.get("following", 0),
+        "tweets_count": user_info.get("tweets_count", 0),
         "tweets_parsed": len(tweets),
         "peak_day": top_day,
         "peak_hour_utc": top_hour,
@@ -79,66 +119,62 @@ def _fetch_and_analyze_user(username: str, tweet_count: int = 30) -> dict[str, A
         "engagement_insights": engagement.get("insights", ""),
         "top_posts": engagement.get("top_posts", []),
     }
-    return {"_full": full, "_summary": summary}
+    ctx.context.analyzed_users[username] = summary
+    return json.dumps(summary, ensure_ascii=False)
 
 
-def run_interactive_loop(tweet_count: int = 30) -> None:
-    """Start the interactive KOL analysis agent."""
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    messages: list[Any] = [{"role": "system", "content": SYSTEM_PROMPT}]
-    analyzed_users: dict[str, Any] = {}
+kol_agent = Agent[AgentContext](
+    name="KOL Analysis Agent",
+    handoff_description="Specialist for fetching and analyzing X/Twitter user profiles, posting patterns, and engagement.",
+    instructions=KOL_SYSTEM_PROMPT,
+    model="gpt-4o",
+    tools=[fetch_user, analyze_user],
+)
+
+main_agent = Agent[AgentContext](
+    name="Assistant",
+    instructions=MAIN_SYSTEM_PROMPT,
+    model="gpt-4o",
+    tools=[WebSearchTool()],
+    handoffs=[kol_agent],
+)
+
+
+async def _run_loop(tweet_count: int = 30) -> None:
+    ctx = AgentContext(tweet_count=tweet_count)
+    input_list: list = []
+    session = PromptSession()
 
     console.print("[bold green]KOL Analysis Agent[/] [dim](type 'exit' to quit)[/]\n")
 
     while True:
         try:
-            user_input = input("You: ").strip()
+            user_input = await session.prompt_async("You: ")
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]Goodbye![/]")
             break
 
+        user_input = user_input.strip()
         if not user_input:
             continue
         if user_input.lower() in ("exit", "quit", "q"):
             console.print("[dim]Goodbye![/]")
             break
 
-        messages.append({"role": "user", "content": user_input})
+        input_list.append({"role": "user", "content": user_input})
 
-        # Inner loop: keep going until LLM stops calling tools
-        while True:
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                tools=TOOL_SCHEMAS,
-                tool_choice="auto",
-                messages=messages,
-            )
-            msg = response.choices[0].message
-            messages.append(msg)
+        result = Runner.run_streamed(main_agent, input=input_list, context=ctx)
+        console.print("\n[bold cyan]Agent:[/]", end=" ")
 
-            if not msg.tool_calls:
-                console.print(f"\n[bold cyan]Agent:[/]")
-                console.print(Markdown(msg.content or ""))
-                console.print()
-                break
+        async for event in result.stream_events():
+            if event.type == "raw_response_event":
+                if isinstance(event.data, ResponseTextDeltaEvent):
+                    print(event.data.delta, end="", flush=True)
 
-            for call in msg.tool_calls:
-                fn_args = json.loads(call.function.arguments)
-                username = fn_args.get("username", "").lstrip("@")
+        print("\n")
+        input_list = result.to_input_list()
 
-                if username in analyzed_users:
-                    tool_content = {
-                        **analyzed_users[username]["_summary"],
-                        "note": "cached — already analyzed",
-                    }
-                else:
-                    console.print(f"  [dim]→ Fetching @{username}...[/]")
-                    result = _fetch_and_analyze_user(username, fn_args.get("tweet_count", tweet_count))
-                    analyzed_users[username] = result
-                    tool_content = result["_summary"]
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": call.id,
-                    "content": json.dumps(tool_content, ensure_ascii=False),
-                })
+def run_interactive_loop(tweet_count: int = 30) -> None:
+    """Start the interactive KOL analysis agent."""
+    asyncio.run(_run_loop(tweet_count))
