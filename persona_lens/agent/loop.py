@@ -3,12 +3,16 @@
 import asyncio
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from agents import Agent, Runner, RunContextWrapper, WebSearchTool, function_tool
+from agents.extensions.memory import SQLAlchemySession
 from openai.types.responses import ResponseTextDeltaEvent
 from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import HTML
 from rich.console import Console
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from persona_lens.fetchers.x import fetch_snapshot
 from persona_lens.fetchers.tweet_parser import extract_tweet_data, extract_user_info
@@ -124,7 +128,7 @@ async def analyze_user(
 
 
 kol_agent = Agent[AgentContext](
-    name="KOL Analysis Agent",
+    name="KOL X Analysis Agent",
     handoff_description="Specialist for fetching and analyzing X/Twitter user profiles, posting patterns, and engagement.",
     instructions=KOL_SYSTEM_PROMPT,
     model="gpt-4o",
@@ -142,14 +146,20 @@ main_agent = Agent[AgentContext](
 
 async def _run_loop(tweet_count: int = 30) -> None:
     ctx = AgentContext(tweet_count=tweet_count)
-    input_list: list = []
-    session = PromptSession()
+    # db_path = Path.home() / ".persona-lens" / "sessions.db"
+    # db_path.parent.mkdir(parents=True, exist_ok=True)
+    # engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+
+    # In-memory session for testing
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    agent_session = SQLAlchemySession("kol-session", engine=engine, create_tables=True)
+    prompt_session = PromptSession()
 
     console.print("[bold green]KOL Analysis Agent[/] [dim](type 'exit' to quit)[/]\n")
 
     while True:
         try:
-            user_input = await session.prompt_async("You: ")
+            user_input = await prompt_session.prompt_async(HTML("<ansigreen><b>You</b></ansigreen>: "))
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]Goodbye![/]")
             break
@@ -161,9 +171,12 @@ async def _run_loop(tweet_count: int = 30) -> None:
             console.print("[dim]Goodbye![/]")
             break
 
-        input_list.append({"role": "user", "content": user_input})
-
-        result = Runner.run_streamed(main_agent, input=input_list, context=ctx)
+        result = Runner.run_streamed(
+            main_agent,
+            input=user_input,
+            context=ctx,
+            session=agent_session,
+        )
         console.print("\n[bold cyan]Agent:[/]", end=" ")
 
         async for event in result.stream_events():
@@ -172,7 +185,6 @@ async def _run_loop(tweet_count: int = 30) -> None:
                     print(event.data.delta, end="", flush=True)
 
         print("\n")
-        input_list = result.to_input_list()
 
 
 def run_interactive_loop(tweet_count: int = 30) -> None:
