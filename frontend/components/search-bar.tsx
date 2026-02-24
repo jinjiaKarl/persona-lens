@@ -1,7 +1,7 @@
 // frontend/components/search-bar.tsx
 "use client";
 
-import { useState, FormEvent } from "react";
+import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,7 +25,7 @@ export function SearchBar({
   const [username, setUsername] = useState(initialUsername);
   const [tweets, setTweets] = useState(String(initialTweets));
 
-  function handleSubmit(e: FormEvent) {
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const trimmed = username.replace(/^@/, "").trim();
     if (!trimmed) return;
