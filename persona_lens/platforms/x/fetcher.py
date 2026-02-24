@@ -2,11 +2,8 @@ import httpx
 import os
 import re
 import urllib.parse
-from collections import Counter
-from datetime import datetime, timezone
 
 SESSION_ID = "persona-lens"
-_TWITTER_EPOCH_MS = 1288834974657  # Nov 4, 2010
 INSTANCES_URL = "https://raw.githubusercontent.com/libredirect/instances/main/data.json"
 
 
@@ -17,80 +14,6 @@ def _count_tweets(snapshot: str) -> int:
     """
     return len(set(re.findall(r'/url: /\w+/status/(\d+)#m', snapshot)))
 
-
-_TIME_SLOTS = [
-    ("00-04", 0),
-    ("04-08", 4),
-    ("08-12", 8),
-    ("12-16", 12),
-    ("16-20", 16),
-    ("20-24", 20),
-]
-
-
-def _hour_to_slot(hour: int) -> str:
-    for label, start in reversed(_TIME_SLOTS):
-        if hour >= start:
-            return label
-    return "00-04"
-
-
-def extract_activity(snapshot: str) -> tuple[dict[str, int], dict[str, int]]:
-    """Decode Twitter snowflake IDs to get day-of-week and time-slot posting counts (UTC).
-
-    Returns (posting_days, posting_hours).
-    """
-    tweet_ids = set(re.findall(r'/url: /\w+/status/(\d+)#m', snapshot))
-    days: Counter = Counter()
-    hours: Counter = Counter()
-    for tid in tweet_ids:
-        try:
-            ts_ms = (int(tid) >> 22) + _TWITTER_EPOCH_MS
-            dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
-            days[dt.strftime('%A')] += 1
-            hours[_hour_to_slot(dt.hour)] += 1
-        except (ValueError, OverflowError):
-            continue
-    return dict(days), dict(hours)
-
-
-def clean_snapshot(snapshot: str) -> str:
-    """Extract only meaningful text from an accessibility snapshot.
-
-    Keeps: bio (paragraph), tweet text lines, profile stats (listitem with numbers).
-    Drops: links, navigation, images, empty lines, pure engagement-stat numbers.
-    """
-    lines = []
-    for line in snapshot.splitlines():
-        stripped = line.strip()
-
-        if stripped.startswith("- paragraph:"):
-            content = stripped.removeprefix("- paragraph:").strip()
-
-        elif stripped.startswith("- text:"):
-            content = stripped.removeprefix("- text:").strip().strip('"')
-            # drop pure engagement stats: "310  1,051  10,435  1,587,908"
-            if re.fullmatch(r'[\d,\s]+', content):
-                continue
-
-        elif stripped.startswith("- listitem:"):
-            content = stripped.removeprefix("- listitem:").strip()
-            # keep only profile stats (e.g. "Tweets 72,419") — must have both word and digit
-            if not re.search(r'[A-Za-z]', content) or not re.search(r'\d', content):
-                continue
-
-        else:
-            continue
-
-        # remove Unicode private-use-area chars (Nitter uses them for action icons)
-        content = re.sub(r'[\ue000-\uf8ff]', '', content).strip()
-        # strip trailing engagement stats (icon-stripped form: "great post  3  1  493")
-        content = re.sub(r'(\s+[\d,]+){2,}\s*$', '', content).strip()
-        # drop anything with no letters — catches standalone stats, stray numbers
-        if content and re.search(r'[A-Za-z]', content):
-            lines.append(content)
-
-    return "\n".join(lines)
 
 
 def _extract_cursor(snapshot: str) -> str | None:
