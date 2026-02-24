@@ -43,7 +43,7 @@ export function SearchBar({
           type="text"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          placeholder="e.g. karpathy\u2026"
+          placeholder="e.g. karpathy…"
           autoComplete="off"
           spellCheck={false}
           disabled={isLoading}
