@@ -1,4 +1,4 @@
-from persona_lens.fetchers.patterns import compute_posting_patterns
+from persona_lens.utils.patterns import compute_posting_patterns
 
 TWEETS = [
     {"id": "1750000000000000001", "timestamp_ms": 1642723174657, "text": "x", "likes": 5, "retweets": 1, "replies": 0},

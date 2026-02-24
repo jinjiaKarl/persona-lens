@@ -317,8 +317,3 @@ def _extract_simple(snapshot: str) -> list[dict[str, Any]]:
                 pending_texts.append(text_part.strip())
 
     return tweets
-
-if __name__ == "__main__":
-    from persona_lens.fetchers.x import fetch_snapshot
-    print(extract_tweet_data(fetch_snapshot("hasantoxr")))
-    print(extract_user_info(fetch_snapshot("hasantoxr"), "hasantoxr"))
