@@ -98,17 +98,31 @@ async def analyze(username: str, tweets: int = 30):
             }
             profile = await analyze_user_profile(username, user_tweets)
 
-            # Sync into global AgentContext so the chat agent can reuse without re-fetching
+            # Sync into global AgentContext so the chat agent can reuse without re-fetching.
+            # analysis_cache entry mirrors the summary dict built by analyze_user in agent.py.
+            peak_days = patterns.get("peak_days", {})
+            peak_hours = patterns.get("peak_hours", {})
+            engagement = profile.get("engagement", {})
+            products = profile.get("products", [])
             _global_ctx.profile_cache.setdefault("x", {})[username] = {
                 "tweets": user_tweets,
                 "patterns": patterns,
                 "user_info": user_info,
             }
             _global_ctx.analysis_cache.setdefault("x", {})[username] = {
+                "username": username,
+                "display_name": user_info.get("display_name", ""),
+                "bio": user_info.get("bio", ""),
+                "followers": user_info.get("followers", 0),
+                "following": user_info.get("following", 0),
+                "tweets_count": user_info.get("tweets_count", 0),
+                "tweets_parsed": len(user_tweets),
+                "peak_day": max(peak_days, key=peak_days.get) if peak_days else "N/A",
+                "peak_hour_utc": max(peak_hours, key=peak_hours.get) if peak_hours else "N/A",
                 "writing_style": profile.get("writing_style", ""),
-                "products": profile.get("products", []),
-                "top_posts": profile.get("engagement", {}).get("top_posts", []),
-                "engagement_insights": profile.get("engagement", {}).get("insights", ""),
+                "products": [{"product": p["product"], "category": p["category"]} for p in products],
+                "engagement_insights": engagement.get("insights", ""),
+                "top_posts": engagement.get("top_posts", []),
             }
 
             result = {

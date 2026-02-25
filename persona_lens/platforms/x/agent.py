@@ -22,7 +22,7 @@ Tools: fetch_user (call first), then analyze_user.
     products, top posts), answer ONLY that question — concisely and directly.
   - If the user asks for a full analysis, overview, or does not specify what they
     want, output the complete profile summary.
-- Always reply in the same language the user used."""
+- Always reply in English."""
 
 
 @function_tool
