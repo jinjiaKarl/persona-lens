@@ -98,6 +98,19 @@ async def analyze(username: str, tweets: int = 30):
             }
             profile = await analyze_user_profile(username, user_tweets)
 
+            # Sync into global AgentContext so the chat agent can reuse without re-fetching
+            _global_ctx.profile_cache.setdefault("x", {})[username] = {
+                "tweets": user_tweets,
+                "patterns": patterns,
+                "user_info": user_info,
+            }
+            _global_ctx.analysis_cache.setdefault("x", {})[username] = {
+                "writing_style": profile.get("writing_style", ""),
+                "products": profile.get("products", []),
+                "top_posts": profile.get("engagement", {}).get("top_posts", []),
+                "engagement_insights": profile.get("engagement", {}).get("insights", ""),
+            }
+
             result = {
                 "user_info": user_info,
                 "tweets": user_tweets,
