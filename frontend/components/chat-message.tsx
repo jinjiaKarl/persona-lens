@@ -38,7 +38,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
           </p>
         )}
         {!content && isStreaming && !toolCalls.length && (
-          <p className="text-muted-foreground/60">Thinking\u2026</p>
+          <p className="text-muted-foreground/60">Thinking…</p>
         )}
         {error && (
           <div className="mt-2">

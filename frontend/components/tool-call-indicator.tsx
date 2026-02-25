@@ -17,7 +17,7 @@ export function ToolCallIndicator({ toolCalls }: ToolCallIndicatorProps) {
       {toolCalls.map((tc, i) => (
         <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
           <span aria-hidden="true">→</span>
-          <span>{TOOL_LABELS[tc.tool] ?? `${tc.tool}\u2026`}</span>
+          <span>{TOOL_LABELS[tc.tool] ?? `${tc.tool}…`}</span>
         </div>
       ))}
     </div>

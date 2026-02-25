@@ -68,7 +68,7 @@ export function ChatPanel({ onAnalysisResult }: ChatPanelProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about a KOL, or type 'analyze @username'\u2026"
+            placeholder="Ask about a KOL, or type 'analyze @username'…"
             autoComplete="off"
             spellCheck={false}
             disabled={state.isStreaming}
@@ -84,7 +84,7 @@ export function ChatPanel({ onAnalysisResult }: ChatPanelProps) {
           aria-label="Send message"
           style={{ touchAction: "manipulation" }}
         >
-          {state.isStreaming ? "\u22EF" : "Send"}
+          {state.isStreaming ? "⋯" : "Send"}
         </Button>
       </form>
     </div>
