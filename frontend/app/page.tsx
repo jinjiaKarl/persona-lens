@@ -23,7 +23,8 @@ function AnalysisPage() {
   const router = useRouter();
   const params = useSearchParams();
   const { state, analyze } = useAnalysis();
-  const [chatResult, setChatResult] = useState<AnalysisResult | null>(null);
+  const [analyzedProfiles, setAnalyzedProfiles] = useState<Record<string, AnalysisResult>>({});
+  const [selectedUsername, setSelectedUsername] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>("results");
 
   const initialUser = params.get("user") ?? "";
@@ -44,15 +45,25 @@ function AnalysisPage() {
     [router, analyze]
   );
 
-  // When chat triggers an analysis, switch to results tab on mobile and update result
-  const handleChatAnalysis = useCallback((result: AnalysisResult) => {
-    setChatResult(result);
+  const { status, progress, result, error } = state;
+
+  useEffect(() => {
+    if (result) {
+      const username = result.user_info.username;
+      setAnalyzedProfiles(prev => ({ ...prev, [username]: result }));
+      setSelectedUsername(username);
+    }
+  }, [result]);
+
+  // When chat triggers an analysis, add to map and switch to results tab on mobile
+  const handleChatAnalysis = useCallback((chatResult: AnalysisResult) => {
+    const username = chatResult.user_info.username;
+    setAnalyzedProfiles(prev => ({ ...prev, [username]: chatResult }));
+    setSelectedUsername(username);
     setMobileTab("results");
   }, []);
 
-  // The displayed result: search bar result takes priority, then chat result
-  const { status, progress, result: searchResult, error } = state;
-  const displayResult = searchResult ?? chatResult;
+  const displayResult = selectedUsername ? analyzedProfiles[selectedUsername] : null;
 
   // ── Analysis panel content ───────────────────────────────────────────────
   const analysisContent = (
@@ -64,7 +75,26 @@ function AnalysisPage() {
         initialTweets={initialTweets}
       />
 
-      {status === "idle" && !chatResult && <EmptyState />}
+      {Object.keys(analyzedProfiles).length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {Object.keys(analyzedProfiles).map(username => (
+            <button
+              key={username}
+              onClick={() => setSelectedUsername(username)}
+              className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                selectedUsername === username
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+              style={{ touchAction: "manipulation" }}
+            >
+              @{username}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {status === "idle" && Object.keys(analyzedProfiles).length === 0 && <EmptyState />}
 
       {status === "loading" && progress && (
         <ProgressIndicator stage={progress.stage} message={progress.message} />
