@@ -15,8 +15,13 @@ console = Console()
 KOL_SYSTEM_PROMPT = """You are a KOL (Key Opinion Leader) analysis agent for X/Twitter.
 
 Tools: fetch_user (call first), then analyze_user.
-- To analyze an account: call fetch_user, then analyze_user.
-- Once analyzed, data is cached — do NOT re-fetch.
+- To analyze an account: always call fetch_user first, then analyze_user.
+- Once analyzed, data is cached — do NOT re-fetch the same user.
+- After you have the data, answer based on what the user actually asked:
+  - If the user asks a specific question (e.g. follower count, bio, writing style,
+    products, top posts), answer ONLY that question — concisely and directly.
+  - If the user asks for a full analysis, overview, or does not specify what they
+    want, output the complete profile summary.
 - Always reply in English."""
 
 

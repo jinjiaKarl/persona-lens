@@ -37,7 +37,7 @@ def _parse_stats_from_text(raw: str) -> tuple[str, int, int, int, int]:
     # Check pure stats line first (all digits, commas, spaces)
     if re.fullmatch(r'[\d,\s]+', text):
         text_part = ''
-        nums = [int(n.replace(',', '')) for n in re.findall(r'[\d,]+', text)]
+        nums = [int(n.replace(',', '')) for n in re.findall(r'\d[\d,]*', text)]
     else:
         # Try to find trailing numbers separated by 2+ spaces
         # Pattern: text_content  num  num  num  [num]

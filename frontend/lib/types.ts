@@ -53,6 +53,27 @@ export interface AnalysisResult {
   };
 }
 
+// ── Chat types ──────────────────────────────────────────────────────────────
+
+export interface ToolCallInfo {
+  tool: string;
+  status: "running" | "done";
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "agent" | "system";
+  content: string;       // accumulated text (built up from token deltas)
+  isStreaming: boolean;  // true while receiving tokens
+  toolCalls: ToolCallInfo[];
+  error?: { error: string; fix: string };
+}
+
+export interface ChatState {
+  messages: ChatMessage[];
+  isStreaming: boolean;
+}
+
 export type ProgressStage = "fetching" | "parsing" | "analyzing" | "done";
 
 export interface ProgressEvent {
