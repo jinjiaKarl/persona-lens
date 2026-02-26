@@ -8,10 +8,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Trash2 } from "lucide-react";
 import { useChat } from "@/hooks/use-chat";
 import type { AnalysisResult } from "@/lib/types";
+import type { Session } from "@/hooks/use-session-manager";
 
 interface ChatPanelProps {
   sessionId: string;
-  sessions: { id: string; title: string; createdAt: number }[];
+  sessions: Session[];
   onNewSession: () => void;
   onSwitchSession: (id: string) => void;
   onDeleteSession: (id: string) => void;
@@ -66,7 +67,7 @@ export function ChatPanel({ sessionId, sessions, onNewSession, onSwitchSession, 
           </SelectTrigger>
           <SelectContent position="popper" align="start">
             {sessions.map((s) => (
-              <SelectItem key={s.id} value={s.id}>
+              <SelectItem key={s.session_id} value={s.session_id}>
                 {s.title}
               </SelectItem>
             ))}

@@ -26,6 +26,7 @@ function AnalysisPage() {
   const {
     sessions,
     activeSessionId,
+    isLoading: sessionsLoading,
     createSession,
     switchSession,
     deleteSession,
@@ -204,94 +205,102 @@ function AnalysisPage() {
         <h1 className="text-lg font-bold tracking-tight">Persona Lens</h1>
       </header>
 
-      {/* ── Desktop: side-by-side ── */}
-      <main
-        id="main-content"
-        className="hidden md:flex flex-1 overflow-hidden gap-0"
-      >
-        {/* Left: analysis panel */}
-        <div className="w-3/5 overflow-y-auto p-4 border-r">
-          {analysisContent}
+      {sessionsLoading ? (
+        <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+          Loading…
         </div>
-
-        {/* Right: chat panel */}
-        <div className="w-2/5 p-3 flex flex-col">
-          <ChatPanel
-            key={activeSessionId}
-            sessionId={activeSessionId}
-            sessions={sessions}
-            onNewSession={createSession}
-            onSwitchSession={switchSession}
-            onDeleteSession={deleteSession}
-            onAnalysisResult={handleChatAnalysis}
-          />
-        </div>
-      </main>
-
-      {/* ── Mobile: tab switching ── */}
-      <div className="md:hidden flex flex-col flex-1 overflow-hidden">
-        {/* Tab bar */}
-        <div
-          role="tablist"
-          aria-label="View"
-          className="flex border-b shrink-0"
-        >
-          <button
-            role="tab"
-            aria-selected={mobileTab === "results"}
-            aria-controls="panel-results"
-            onClick={() => setMobileTab("results")}
-            className={`flex-1 py-2 text-sm font-medium transition-colors ${
-              mobileTab === "results"
-                ? "border-b-2 border-primary text-primary"
-                : "text-muted-foreground"
-            }`}
-            style={{ touchAction: "manipulation" }}
+      ) : (
+        <>
+          {/* ── Desktop: side-by-side ── */}
+          <main
+            id="main-content"
+            className="hidden md:flex flex-1 overflow-hidden gap-0"
           >
-            Results
-          </button>
-          <button
-            role="tab"
-            aria-selected={mobileTab === "chat"}
-            aria-controls="panel-chat"
-            onClick={() => setMobileTab("chat")}
-            className={`flex-1 py-2 text-sm font-medium transition-colors ${
-              mobileTab === "chat"
-                ? "border-b-2 border-primary text-primary"
-                : "text-muted-foreground"
-            }`}
-            style={{ touchAction: "manipulation" }}
-          >
-            Chat
-          </button>
-        </div>
+            {/* Left: analysis panel */}
+            <div className="w-3/5 overflow-y-auto p-4 border-r">
+              {analysisContent}
+            </div>
 
-        {/* Tab panels */}
-        <div
-          id="panel-results"
-          role="tabpanel"
-          hidden={mobileTab !== "results"}
-          className="flex-1 overflow-y-auto p-4"
-        >
-          {analysisContent}
-        </div>
-        <div
-          id="panel-chat"
-          role="tabpanel"
-          hidden={mobileTab !== "chat"}
-          className="flex-1 overflow-hidden p-3 flex flex-col"
-        >
-          <ChatPanel
-            key={activeSessionId}
-            sessionId={activeSessionId}
-            sessions={sessions}
-            onNewSession={createSession}
-            onSwitchSession={switchSession}
-            onDeleteSession={deleteSession}
-            onAnalysisResult={handleChatAnalysis}
-          />
-        </div>
-      </div>
+            {/* Right: chat panel */}
+            <div className="w-2/5 p-3 flex flex-col">
+              <ChatPanel
+                key={activeSessionId}
+                sessionId={activeSessionId}
+                sessions={sessions}
+                onNewSession={createSession}
+                onSwitchSession={switchSession}
+                onDeleteSession={deleteSession}
+                onAnalysisResult={handleChatAnalysis}
+              />
+            </div>
+          </main>
+
+          {/* ── Mobile: tab switching ── */}
+          <div className="md:hidden flex flex-col flex-1 overflow-hidden">
+            {/* Tab bar */}
+            <div
+              role="tablist"
+              aria-label="View"
+              className="flex border-b shrink-0"
+            >
+              <button
+                role="tab"
+                aria-selected={mobileTab === "results"}
+                aria-controls="panel-results"
+                onClick={() => setMobileTab("results")}
+                className={`flex-1 py-2 text-sm font-medium transition-colors ${
+                  mobileTab === "results"
+                    ? "border-b-2 border-primary text-primary"
+                    : "text-muted-foreground"
+                }`}
+                style={{ touchAction: "manipulation" }}
+              >
+                Results
+              </button>
+              <button
+                role="tab"
+                aria-selected={mobileTab === "chat"}
+                aria-controls="panel-chat"
+                onClick={() => setMobileTab("chat")}
+                className={`flex-1 py-2 text-sm font-medium transition-colors ${
+                  mobileTab === "chat"
+                    ? "border-b-2 border-primary text-primary"
+                    : "text-muted-foreground"
+                }`}
+                style={{ touchAction: "manipulation" }}
+              >
+                Chat
+              </button>
+            </div>
+
+            {/* Tab panels */}
+            <div
+              id="panel-results"
+              role="tabpanel"
+              hidden={mobileTab !== "results"}
+              className="flex-1 overflow-y-auto p-4"
+            >
+              {analysisContent}
+            </div>
+            <div
+              id="panel-chat"
+              role="tabpanel"
+              hidden={mobileTab !== "chat"}
+              className="flex-1 overflow-hidden p-3 flex flex-col"
+            >
+              <ChatPanel
+                key={activeSessionId}
+                sessionId={activeSessionId}
+                sessions={sessions}
+                onNewSession={createSession}
+                onSwitchSession={switchSession}
+                onDeleteSession={deleteSession}
+                onAnalysisResult={handleChatAnalysis}
+              />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
