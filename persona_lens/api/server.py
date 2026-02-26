@@ -3,6 +3,7 @@ import json
 import os
 from typing import AsyncGenerator
 
+import aiosqlite
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -29,30 +30,119 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Per-session state ────────────────────────────────────────────────────────
+# ── Database ─────────────────────────────────────────────────────────────────
+# Schema is user_id → session_id → username to support multi-tenancy.
+# user_id defaults to "default" until auth is wired in.
 
-_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+DB_PATH = os.getenv("DB_PATH", "persona_lens.db")
+_engine = create_async_engine(f"sqlite+aiosqlite:///{DB_PATH}")
+
+
+@app.on_event("startup")
+async def _create_tables() -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS profile_results (
+                user_id     TEXT NOT NULL DEFAULT 'default',
+                session_id  TEXT NOT NULL,
+                username    TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                PRIMARY KEY (user_id, session_id, username)
+            )
+        """)
+        await db.commit()
+
+
+async def _save_profile(user_id: str, session_id: str, username: str, result: dict) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT OR REPLACE INTO profile_results
+               (user_id, session_id, username, result_json) VALUES (?, ?, ?, ?)""",
+            (user_id, session_id, username, json.dumps(result, ensure_ascii=False)),
+        )
+        await db.commit()
+
+
+async def _load_profiles(user_id: str, session_id: str) -> dict[str, dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT username, result_json FROM profile_results WHERE user_id = ? AND session_id = ?",
+            (user_id, session_id),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return {row[0]: json.loads(row[1]) for row in rows}
+
+
+# ── Per-session in-memory state ───────────────────────────────────────────────
+# Keyed by "user_id:session_id" to ensure isolation across tenants.
+
 _contexts: dict[str, AgentContext] = {}
 _chat_sessions: dict[str, SQLAlchemySession] = {}
 
 
-def get_context(session_id: str) -> AgentContext:
-    """Return AgentContext for the given session, creating if needed."""
-    if session_id not in _contexts:
-        _contexts[session_id] = AgentContext()
-    return _contexts[session_id]
+def _ctx_key(user_id: str, session_id: str) -> str:
+    return f"{user_id}:{session_id}"
 
 
-async def get_chat_session(session_id: str) -> SQLAlchemySession:
-    """Return SQLAlchemySession for the given session, creating if needed."""
-    if session_id not in _chat_sessions:
-        _chat_sessions[session_id] = SQLAlchemySession(
-            session_id, engine=_engine, create_tables=True
+def get_context(user_id: str, session_id: str) -> AgentContext:
+    key = _ctx_key(user_id, session_id)
+    if key not in _contexts:
+        _contexts[key] = AgentContext()
+    return _contexts[key]
+
+
+async def get_chat_session(user_id: str, session_id: str) -> SQLAlchemySession:
+    key = _ctx_key(user_id, session_id)
+    if key not in _chat_sessions:
+        _chat_sessions[key] = SQLAlchemySession(
+            key, engine=_engine, create_tables=True
         )
-    return _chat_sessions[session_id]
+    return _chat_sessions[key]
+
+
+def _warm_context(ctx: AgentContext, username: str, result: dict) -> None:
+    """Restore a stored profile result into an AgentContext cache."""
+    user_info = result.get("user_info", {})
+    patterns = result.get("patterns", {})
+    analysis = result.get("analysis", {})
+    tweets = result.get("tweets", [])
+    engagement = analysis.get("engagement", {})
+    peak_days = patterns.get("peak_days", {})
+    peak_hours = patterns.get("peak_hours", {})
+    ctx.profile_cache.setdefault("x", {})[username] = {
+        "tweets": tweets,
+        "patterns": patterns,
+        "user_info": user_info,
+    }
+    ctx.analysis_cache.setdefault("x", {})[username] = {
+        "username": username,
+        "display_name": user_info.get("display_name", ""),
+        "bio": user_info.get("bio", ""),
+        "followers": user_info.get("followers", 0),
+        "following": user_info.get("following", 0),
+        "tweets_count": user_info.get("tweets_count", 0),
+        "tweets_parsed": len(tweets),
+        "peak_day": max(peak_days, key=peak_days.get) if peak_days else "N/A",
+        "peak_hour_utc": max(peak_hours, key=peak_hours.get) if peak_hours else "N/A",
+        "writing_style": analysis.get("writing_style", ""),
+        "products": analysis.get("products", []),
+        "engagement_insights": engagement.get("insights", ""),
+        "top_posts": engagement.get("top_posts", []),
+    }
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
+
+@app.get("/api/sessions/{session_id}/profiles")
+async def get_profiles(session_id: str, user_id: str = "default"):
+    """Return all stored analysis results for a session, warming the AgentContext cache."""
+    profiles = await _load_profiles(user_id, session_id)
+    if profiles:
+        ctx = get_context(user_id, session_id)
+        for username, result in profiles.items():
+            _warm_context(ctx, username, result)
+    return profiles
+
 
 @app.get("/api/health")
 def health():
@@ -63,10 +153,10 @@ def health():
 
 
 @app.post("/api/analyze/{username}")
-async def analyze(username: str, tweets: int = 30, session_id: str = "default"):
+async def analyze(username: str, tweets: int = 30, session_id: str = "default", user_id: str = "default"):
     """Stream SSE events: progress stages then final result."""
     username = username.lstrip("@")
-    ctx = get_context(session_id)
+    ctx = get_context(user_id, session_id)
 
     async def _generate() -> AsyncGenerator[dict, None]:
         try:
@@ -98,8 +188,7 @@ async def analyze(username: str, tweets: int = 30, session_id: str = "default"):
             }
             profile = await analyze_user_profile(username, user_tweets)
 
-            # Sync into per-session AgentContext so the chat agent can reuse without re-fetching.
-            # analysis_cache entry mirrors the summary dict built by analyze_user in agent.py.
+            # Sync into AgentContext so the chat agent can reuse without re-fetching.
             peak_days = patterns.get("peak_days", {})
             peak_hours = patterns.get("peak_hours", {})
             engagement = profile.get("engagement", {})
@@ -131,6 +220,7 @@ async def analyze(username: str, tweets: int = 30, session_id: str = "default"):
                 "patterns": patterns,
                 "analysis": profile,
             }
+            await _save_profile(user_id, session_id, username, result)
             yield {"event": "result", "data": json.dumps(result, ensure_ascii=False)}
 
         except Exception as exc:
@@ -151,16 +241,16 @@ async def analyze(username: str, tweets: int = 30, session_id: str = "default"):
 class ChatRequest(BaseModel):
     message: str
     session_id: str = "default"
+    user_id: str = "default"
 
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     """Stream chat responses from the main agent via SSE."""
-    ctx = get_context(req.session_id)
-    session = await get_chat_session(req.session_id)
+    ctx = get_context(req.user_id, req.session_id)
+    session = await get_chat_session(req.user_id, req.session_id)
 
     async def _generate() -> AsyncGenerator[dict, None]:
-        # Snapshot which users are already analyzed before this turn
         before_analyses: set[str] = set(ctx.analysis_cache.get("x", {}).keys())
 
         try:
@@ -172,7 +262,6 @@ async def chat(req: ChatRequest):
             )
 
             async for event in result.stream_events():
-                # Stream text tokens
                 if event.type == "raw_response_event":
                     if isinstance(event.data, ResponseTextDeltaEvent):
                         delta = event.data.delta
@@ -181,7 +270,6 @@ async def chat(req: ChatRequest):
                                 "event": "token",
                                 "data": json.dumps({"delta": delta}),
                             }
-                # Show tool activity
                 elif event.type == "run_item_stream_event":
                     item = event.item
                     item_type = getattr(item, "type", "")
@@ -194,9 +282,7 @@ async def chat(req: ChatRequest):
                                 "data": json.dumps({"tool": tool_name, "status": "running"}),
                             }
 
-            # After agent finishes: emit analysis_result for newly analyzed users.
-            # The agent stores a flat summary in analysis_cache; reconstruct the
-            # nested structure expected by the frontend's AnalysisResult type.
+            # Emit analysis_result for newly analyzed users and persist them.
             after_analyses: set[str] = set(ctx.analysis_cache.get("x", {}).keys())
             new_users = after_analyses - before_analyses
             for username in new_users:
@@ -211,14 +297,16 @@ async def chat(req: ChatRequest):
                             "insights": x_summary.get("engagement_insights", ""),
                         },
                     }
+                    profile_result = {
+                        "user_info": x_profile.get("user_info", {}),
+                        "tweets": x_profile.get("tweets", []),
+                        "patterns": x_profile.get("patterns", {}),
+                        "analysis": analysis,
+                    }
+                    await _save_profile(req.user_id, req.session_id, username, profile_result)
                     yield {
                         "event": "analysis_result",
-                        "data": json.dumps({
-                            "user_info": x_profile.get("user_info", {}),
-                            "tweets": x_profile.get("tweets", []),
-                            "patterns": x_profile.get("patterns", {}),
-                            "analysis": analysis,
-                        }, ensure_ascii=False),
+                        "data": json.dumps(profile_result, ensure_ascii=False),
                     }
 
             yield {"event": "done", "data": "{}"}

@@ -34,10 +34,31 @@ function AnalysisPage() {
 
   const { state, analyze } = useAnalysis(activeSessionId);
 
-  // Per-session: { [sessionId]: { [username]: AnalysisResult } }
+  // Per-session: { [sessionId]: { [username]: AnalysisResult } } — fetched from backend
   const [profilesBySession, setProfilesBySession] = useState<Record<string, Record<string, AnalysisResult>>>({});
   // Per-session: { [sessionId]: selectedUsername | null }
   const [selectedBySession, setSelectedBySession] = useState<Record<string, string | null>>({});
+
+  // Fetch stored profiles from backend whenever the active session changes
+  useEffect(() => {
+    async function fetchProfiles() {
+      try {
+        const res = await fetch(`http://localhost:8000/api/sessions/${activeSessionId}/profiles`);
+        if (!res.ok) return;
+        const data: Record<string, AnalysisResult> = await res.json();
+        if (Object.keys(data).length > 0) {
+          setProfilesBySession(prev => ({ ...prev, [activeSessionId]: data }));
+          // Auto-select the last analyzed username if none selected yet
+          setSelectedBySession(prev => {
+            if (prev[activeSessionId]) return prev;
+            const last = Object.keys(data).at(-1) ?? null;
+            return { ...prev, [activeSessionId]: last };
+          });
+        }
+      } catch { /* backend not running */ }
+    }
+    fetchProfiles();
+  }, [activeSessionId]);
   const [mobileTab, setMobileTab] = useState<MobileTab>("results");
 
   const initialUser = params.get("user") ?? "";

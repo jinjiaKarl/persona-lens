@@ -6,7 +6,7 @@ import type { AnalysisState, AnalysisResult, ProgressEvent } from "@/lib/types";
 
 const API_BASE = "http://localhost:8000";
 
-export function useAnalysis(sessionId: string) {
+export function useAnalysis(sessionId: string, userId: string = "default") {
   const [state, setState] = useState<AnalysisState>({
     status: "idle",
     progress: null,
@@ -19,7 +19,7 @@ export function useAnalysis(sessionId: string) {
 
     try {
       const res = await fetch(
-        `${API_BASE}/api/analyze/${encodeURIComponent(username)}?tweets=${tweets}&session_id=${encodeURIComponent(sessionId)}`,
+        `${API_BASE}/api/analyze/${encodeURIComponent(username)}?tweets=${tweets}&session_id=${encodeURIComponent(sessionId)}&user_id=${encodeURIComponent(userId)}`,
         { method: "POST" }
       );
 
@@ -77,7 +77,7 @@ export function useAnalysis(sessionId: string) {
         },
       });
     }
-  }, [sessionId]);
+  }, [sessionId, userId]);
 
   return { state, analyze };
 }

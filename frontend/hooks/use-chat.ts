@@ -21,10 +21,11 @@ const WELCOME: ChatMessage = {
 
 interface UseChatOptions {
   sessionId: string;
+  userId?: string;
   onAnalysisResult?: (result: AnalysisResult) => void;
 }
 
-export function useChat({ sessionId, onAnalysisResult }: UseChatOptions) {
+export function useChat({ sessionId, userId = "default", onAnalysisResult }: UseChatOptions) {
   const [state, setState] = useState<ChatState>({
     messages: [WELCOME],
     isStreaming: false,
@@ -63,6 +64,7 @@ export function useChat({ sessionId, onAnalysisResult }: UseChatOptions) {
           body: JSON.stringify({
             message: text,
             session_id: sessionId,
+            user_id: userId,
           }),
         });
 
@@ -158,7 +160,7 @@ export function useChat({ sessionId, onAnalysisResult }: UseChatOptions) {
         }));
       }
     },
-    [sessionId, onAnalysisResult]
+    [sessionId, userId, onAnalysisResult]
   );
 
   return { state, sendMessage };
