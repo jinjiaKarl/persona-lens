@@ -3,8 +3,6 @@
 import pytest
 from persona_lens.api.server import get_context, _contexts, _chat_sessions
 
-pytestmark = pytest.mark.asyncio
-
 
 def test_get_context_creates_new_for_unknown_session():
     _contexts.clear()
@@ -20,6 +18,7 @@ def test_get_context_returns_same_for_known_session():
     assert ctx1 is ctx2
 
 
+@pytest.mark.asyncio
 async def test_get_chat_session_creates_isolated_sessions():
     from persona_lens.api.server import get_chat_session
     _chat_sessions.clear()
