@@ -7,7 +7,7 @@ from typing import AsyncGenerator
 import aiosqlite
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -105,17 +105,19 @@ async def _list_sessions(user_id: str) -> list[dict]:
 
 async def _rename_session(user_id: str, session_id: str, title: str) -> dict | None:
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
+        cursor = await db.execute(
             "UPDATE sessions SET title = ? WHERE user_id = ? AND session_id = ?",
             (title, user_id, session_id),
         )
+        # Check rowcount before commit to detect missing session without a separate SELECT.
+        if cursor.rowcount == 0:
+            return None
         await db.commit()
-        # Re-read after UPDATE to return the fresh row and detect a missing session_id.
         async with db.execute(
             "SELECT session_id, title, created_at FROM sessions WHERE user_id = ? AND session_id = ?",
             (user_id, session_id),
-        ) as cursor:
-            row = await cursor.fetchone()
+        ) as cur:
+            row = await cur.fetchone()
     if row is None:
         return None
     return {"session_id": row[0], "title": row[1], "created_at": row[2]}
@@ -196,11 +198,11 @@ def _warm_context(ctx: AgentContext, username: str, result: dict) -> None:
 
 class CreateSessionRequest(BaseModel):
     session_id: str
-    title: str
+    title: str = Field(max_length=30)
 
 
 class RenameSessionRequest(BaseModel):
-    title: str
+    title: str = Field(max_length=30)
 
 
 @app.get("/api/users/{user_id}/sessions")

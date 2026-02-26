@@ -18,6 +18,8 @@ import { useAnalysis } from "@/hooks/use-analysis";
 import { useSessionManager } from "@/hooks/use-session-manager";
 import type { AnalysisResult } from "@/lib/types";
 
+const API_BASE = "http://localhost:8000";
+
 type MobileTab = "results" | "chat";
 
 function AnalysisPage() {
@@ -44,7 +46,7 @@ function AnalysisPage() {
   useEffect(() => {
     async function fetchProfiles() {
       try {
-        const res = await fetch(`http://localhost:8000/api/sessions/${activeSessionId}/profiles`);
+        const res = await fetch(`${API_BASE}/api/sessions/${activeSessionId}/profiles`);
         if (!res.ok) return;
         const data: Record<string, AnalysisResult> = await res.json();
         if (Object.keys(data).length > 0) {
