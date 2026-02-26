@@ -4,15 +4,22 @@
 import { useRef, useEffect, useState, FormEvent, KeyboardEvent } from "react";
 import { ChatMessage } from "@/components/chat-message";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Trash2 } from "lucide-react";
 import { useChat } from "@/hooks/use-chat";
 import type { AnalysisResult } from "@/lib/types";
 
 interface ChatPanelProps {
+  sessionId: string;
+  sessions: { id: string; title: string; createdAt: number }[];
+  onNewSession: () => void;
+  onSwitchSession: (id: string) => void;
+  onDeleteSession: (id: string) => void;
   onAnalysisResult?: (result: AnalysisResult) => void;
 }
 
-export function ChatPanel({ onAnalysisResult }: ChatPanelProps) {
-  const { state, sendMessage } = useChat({ onAnalysisResult });
+export function ChatPanel({ sessionId, sessions, onNewSession, onSwitchSession, onDeleteSession, onAnalysisResult }: ChatPanelProps) {
+  const { state, sendMessage } = useChat({ sessionId, onAnalysisResult });
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +49,42 @@ export function ChatPanel({ onAnalysisResult }: ChatPanelProps) {
 
   return (
     <div className="flex flex-col h-full border rounded-lg overflow-hidden">
+      {/* Session switcher */}
+      <div className="flex items-center gap-2 p-2 border-b shrink-0">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onNewSession}
+          aria-label="New chat session"
+          style={{ touchAction: "manipulation" }}
+        >
+          + New
+        </Button>
+        <Select value={sessionId} onValueChange={onSwitchSession}>
+          <SelectTrigger size="sm" className="flex-1 min-w-0">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent position="popper" align="start">
+            {sessions.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.title}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {sessions.length > 1 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onDeleteSession(sessionId)}
+            aria-label="Delete current session"
+            style={{ touchAction: "manipulation" }}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        )}
+      </div>
+
       {/* Message list */}
       <div
         ref={scrollRef}
