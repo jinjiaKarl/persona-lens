@@ -15,6 +15,7 @@ import { EmptyState } from "@/components/empty-state";
 import { ErrorPanel } from "@/components/error-panel";
 import { ChatPanel } from "@/components/chat-panel";
 import { useAnalysis } from "@/hooks/use-analysis";
+import { useSessionManager } from "@/hooks/use-session-manager";
 import type { AnalysisResult } from "@/lib/types";
 
 type MobileTab = "results" | "chat";
@@ -22,9 +23,21 @@ type MobileTab = "results" | "chat";
 function AnalysisPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const { state, analyze } = useAnalysis();
-  const [analyzedProfiles, setAnalyzedProfiles] = useState<Record<string, AnalysisResult>>({});
-  const [selectedUsername, setSelectedUsername] = useState<string | null>(null);
+  const {
+    sessions,
+    activeSessionId,
+    createSession,
+    switchSession,
+    deleteSession,
+    renameSession,
+  } = useSessionManager();
+
+  const { state, analyze } = useAnalysis(activeSessionId);
+
+  // Per-session: { [sessionId]: { [username]: AnalysisResult } }
+  const [profilesBySession, setProfilesBySession] = useState<Record<string, Record<string, AnalysisResult>>>({});
+  // Per-session: { [sessionId]: selectedUsername | null }
+  const [selectedBySession, setSelectedBySession] = useState<Record<string, string | null>>({});
   const [mobileTab, setMobileTab] = useState<MobileTab>("results");
 
   const initialUser = params.get("user") ?? "";
@@ -45,25 +58,37 @@ function AnalysisPage() {
     [router, analyze]
   );
 
+  const analyzedProfiles = profilesBySession[activeSessionId] ?? {};
+  const selectedUsername = selectedBySession[activeSessionId] ?? null;
+  const displayResult = selectedUsername ? analyzedProfiles[selectedUsername] : null;
+
   const { status, progress, result, error } = state;
 
   useEffect(() => {
     if (result) {
       const username = result.user_info.username;
-      setAnalyzedProfiles(prev => ({ ...prev, [username]: result }));
-      setSelectedUsername(username);
+      setProfilesBySession(prev => ({
+        ...prev,
+        [activeSessionId]: { ...(prev[activeSessionId] ?? {}), [username]: result },
+      }));
+      setSelectedBySession(prev => ({ ...prev, [activeSessionId]: username }));
     }
-  }, [result]);
+  }, [result, activeSessionId]);
 
   // When chat triggers an analysis, add to map and switch to results tab on mobile
   const handleChatAnalysis = useCallback((chatResult: AnalysisResult) => {
     const username = chatResult.user_info.username;
-    setAnalyzedProfiles(prev => ({ ...prev, [username]: chatResult }));
-    setSelectedUsername(username);
+    setProfilesBySession(prev => {
+      const current = prev[activeSessionId] ?? {};
+      // Auto-rename session to first analyzed username
+      if (Object.keys(current).length === 0) {
+        renameSession(activeSessionId, `@${username}`);
+      }
+      return { ...prev, [activeSessionId]: { ...current, [username]: chatResult } };
+    });
+    setSelectedBySession(prev => ({ ...prev, [activeSessionId]: username }));
     setMobileTab("results");
-  }, []);
-
-  const displayResult = selectedUsername ? analyzedProfiles[selectedUsername] : null;
+  }, [activeSessionId, renameSession]);
 
   // ── Analysis panel content ───────────────────────────────────────────────
   const analysisContent = (
@@ -80,7 +105,7 @@ function AnalysisPage() {
           {Object.keys(analyzedProfiles).map(username => (
             <button
               key={username}
-              onClick={() => setSelectedUsername(username)}
+              onClick={() => setSelectedBySession(prev => ({ ...prev, [activeSessionId]: username }))}
               className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
                 selectedUsername === username
                   ? "bg-primary text-primary-foreground"
@@ -170,7 +195,15 @@ function AnalysisPage() {
 
         {/* Right: chat panel */}
         <div className="w-2/5 p-3 flex flex-col">
-          <ChatPanel onAnalysisResult={handleChatAnalysis} />
+          <ChatPanel
+            key={activeSessionId}
+            sessionId={activeSessionId}
+            sessions={sessions}
+            onNewSession={createSession}
+            onSwitchSession={switchSession}
+            onDeleteSession={deleteSession}
+            onAnalysisResult={handleChatAnalysis}
+          />
         </div>
       </main>
 
@@ -227,7 +260,15 @@ function AnalysisPage() {
           hidden={mobileTab !== "chat"}
           className="flex-1 overflow-hidden p-3 flex flex-col"
         >
-          <ChatPanel onAnalysisResult={handleChatAnalysis} />
+          <ChatPanel
+            key={activeSessionId}
+            sessionId={activeSessionId}
+            sessions={sessions}
+            onNewSession={createSession}
+            onSwitchSession={switchSession}
+            onDeleteSession={deleteSession}
+            onAnalysisResult={handleChatAnalysis}
+          />
         </div>
       </div>
     </div>
