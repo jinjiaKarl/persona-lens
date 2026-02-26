@@ -1,7 +1,7 @@
 // frontend/hooks/use-chat.ts
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback } from "react";
 import type { ChatState, ChatMessage, AnalysisResult } from "@/lib/types";
 
 const API_BASE = "http://localhost:8000";
@@ -10,16 +10,6 @@ function makeId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function getOrCreateSessionId(): string {
-  if (typeof window === "undefined") return "ssr";
-  const key = "persona-lens-session-id";
-  let id = localStorage.getItem(key);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(key, id);
-  }
-  return id;
-}
 
 const WELCOME: ChatMessage = {
   id: "system-welcome",
@@ -30,19 +20,15 @@ const WELCOME: ChatMessage = {
 };
 
 interface UseChatOptions {
+  sessionId: string;
   onAnalysisResult?: (result: AnalysisResult) => void;
 }
 
-export function useChat({ onAnalysisResult }: UseChatOptions = {}) {
+export function useChat({ sessionId, onAnalysisResult }: UseChatOptions) {
   const [state, setState] = useState<ChatState>({
     messages: [WELCOME],
     isStreaming: false,
   });
-  const sessionIdRef = useRef<string>("default");
-
-  useEffect(() => {
-    sessionIdRef.current = getOrCreateSessionId();
-  }, []);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -76,7 +62,7 @@ export function useChat({ onAnalysisResult }: UseChatOptions = {}) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message: text,
-            session_id: sessionIdRef.current,
+            session_id: sessionId,
           }),
         });
 
@@ -172,7 +158,7 @@ export function useChat({ onAnalysisResult }: UseChatOptions = {}) {
         }));
       }
     },
-    [onAnalysisResult]
+    [sessionId, onAnalysisResult]
   );
 
   return { state, sendMessage };
