@@ -136,6 +136,56 @@ async def _delete_session(user_id: str, session_id: str) -> None:
         await db.commit()
 
 
+def _items_to_display_messages(items: list) -> list[dict]:
+    """Convert TResponseInputItem objects to frontend-displayable message dicts."""
+    messages = []
+    pending_tool_calls: list[dict] = []
+
+    for item in items:
+        # Items may be Pydantic models or plain dicts — normalise to dict.
+        if hasattr(item, "model_dump"):
+            item = item.model_dump()
+
+        item_type = item.get("type", "")
+
+        if item_type == "message":
+            role = item.get("role", "")
+            content = item.get("content", "")
+
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                text = "".join(
+                    part.get("text", "")
+                    for part in content
+                    if part.get("type") in ("text", "input_text", "output_text")
+                )
+            else:
+                text = ""
+
+            if not text:
+                continue
+
+            if role == "user":
+                messages.append({"role": "user", "content": text, "toolCalls": []})
+                pending_tool_calls = []
+            elif role in ("assistant", "agent"):
+                messages.append({
+                    "role": "agent",
+                    "content": text,
+                    "toolCalls": pending_tool_calls,
+                })
+                pending_tool_calls = []
+
+        elif item_type == "function_call":
+            name = item.get("name", "")
+            if name:
+                pending_tool_calls.append({"tool": name, "status": "done"})
+        # function_call_output and other internal items are skipped
+
+    return messages
+
+
 # ── Per-session in-memory state ───────────────────────────────────────────────
 # Keyed by "user_id:session_id" to ensure isolation across tenants.
 
@@ -231,6 +281,14 @@ async def delete_session(user_id: str, session_id: str):
     """Delete a session and all its stored profiles."""
     await _delete_session(user_id, session_id)
     return {"deleted": session_id}
+
+
+@app.get("/api/users/{user_id}/sessions/{session_id}/messages")
+async def get_chat_history(user_id: str, session_id: str):
+    """Return the full chat history for a session in display format."""
+    session = await get_chat_session(user_id, session_id)
+    items = await session.get_items()
+    return _items_to_display_messages(items)
 
 
 @app.get("/api/sessions/{session_id}/profiles")
