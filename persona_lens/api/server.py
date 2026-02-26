@@ -29,28 +29,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Single-user session state (phase 1) ─────────────────────────────────────
-# get_context() returns the global singleton.
-# To migrate to multi-tenant: replace get_context() to look up by session_id.
+# ── Per-session state ────────────────────────────────────────────────────────
 
-_global_ctx = AgentContext()
 _engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-_chat_session: SQLAlchemySession | None = None
+_contexts: dict[str, AgentContext] = {}
+_chat_sessions: dict[str, SQLAlchemySession] = {}
 
 
 def get_context(session_id: str) -> AgentContext:
-    """Return AgentContext for the given session. Single-user: always global."""
-    return _global_ctx
+    """Return AgentContext for the given session, creating if needed."""
+    if session_id not in _contexts:
+        _contexts[session_id] = AgentContext()
+    return _contexts[session_id]
 
 
-async def get_chat_session() -> SQLAlchemySession:
-    """Return the shared SQLAlchemy session (creates tables on first call)."""
-    global _chat_session
-    if _chat_session is None:
-        _chat_session = SQLAlchemySession(
-            "web-chat", engine=_engine, create_tables=True
+async def get_chat_session(session_id: str) -> SQLAlchemySession:
+    """Return SQLAlchemySession for the given session, creating if needed."""
+    if session_id not in _chat_sessions:
+        _chat_sessions[session_id] = SQLAlchemySession(
+            session_id, engine=_engine, create_tables=True
         )
-    return _chat_session
+    return _chat_sessions[session_id]
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -64,9 +63,10 @@ def health():
 
 
 @app.post("/api/analyze/{username}")
-async def analyze(username: str, tweets: int = 30):
+async def analyze(username: str, tweets: int = 30, session_id: str = "default"):
     """Stream SSE events: progress stages then final result."""
     username = username.lstrip("@")
+    ctx = get_context(session_id)
 
     async def _generate() -> AsyncGenerator[dict, None]:
         try:
@@ -98,18 +98,18 @@ async def analyze(username: str, tweets: int = 30):
             }
             profile = await analyze_user_profile(username, user_tweets)
 
-            # Sync into global AgentContext so the chat agent can reuse without re-fetching.
+            # Sync into per-session AgentContext so the chat agent can reuse without re-fetching.
             # analysis_cache entry mirrors the summary dict built by analyze_user in agent.py.
             peak_days = patterns.get("peak_days", {})
             peak_hours = patterns.get("peak_hours", {})
             engagement = profile.get("engagement", {})
             products = profile.get("products", [])
-            _global_ctx.profile_cache.setdefault("x", {})[username] = {
+            ctx.profile_cache.setdefault("x", {})[username] = {
                 "tweets": user_tweets,
                 "patterns": patterns,
                 "user_info": user_info,
             }
-            _global_ctx.analysis_cache.setdefault("x", {})[username] = {
+            ctx.analysis_cache.setdefault("x", {})[username] = {
                 "username": username,
                 "display_name": user_info.get("display_name", ""),
                 "bio": user_info.get("bio", ""),
@@ -157,7 +157,7 @@ class ChatRequest(BaseModel):
 async def chat(req: ChatRequest):
     """Stream chat responses from the main agent via SSE."""
     ctx = get_context(req.session_id)
-    session = await get_chat_session()
+    session = await get_chat_session(req.session_id)
 
     async def _generate() -> AsyncGenerator[dict, None]:
         # Snapshot which users are already analyzed before this turn
