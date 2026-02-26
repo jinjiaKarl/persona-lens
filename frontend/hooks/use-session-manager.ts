@@ -109,43 +109,34 @@ export function useSessionManager(userId: string = DEFAULT_USER) {
       console.error("deleteSession: network error, proceeding optimistically");
     }
 
-    setSessions((prev) => {
-      const remaining = prev.filter((s) => s.session_id !== id);
-      return remaining;
-    });
+    const remaining = sessions.filter((s) => s.session_id !== id);
 
-    setActiveSessionId((cur) => {
-      const remaining = sessions.filter((s) => s.session_id !== id);
-      if (remaining.length === 0) {
-        // Create a replacement session asynchronously
-        const newId = crypto.randomUUID();
-        fetch(`${API_BASE}/api/users/${encodeURIComponent(userId)}/sessions`, {
+    if (remaining.length === 0) {
+      // Create a replacement before updating state to avoid an empty-sessions flash
+      const newId = crypto.randomUUID();
+      let replacement: Session;
+      try {
+        replacement = await fetch(`${API_BASE}/api/users/${encodeURIComponent(userId)}/sessions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ session_id: newId, title: "Chat 1" }),
-        })
-          .then((r) => r.json())
-          .then((created: Session) => {
-            setSessions([created]);
-            setActiveSessionId(newId);
-            saveActiveId(newId);
-          })
-          .catch(() => {
-            const s: Session = { session_id: newId, title: "Chat 1", created_at: Date.now() };
-            setSessions([s]);
-            setActiveSessionId(newId);
-            saveActiveId(newId);
-          });
-        return cur; // will be updated once the async create resolves
+        }).then((r) => r.json()) as Session;
+      } catch {
+        replacement = { session_id: newId, title: "Chat 1", created_at: Date.now() };
       }
-      if (cur === id) {
-        const next = remaining[remaining.length - 1].session_id;
-        saveActiveId(next);
-        return next;
-      }
-      return cur;
-    });
-  }, [sessions, userId]);
+      setSessions([replacement]);
+      setActiveSessionId(replacement.session_id);
+      saveActiveId(replacement.session_id);
+      return;
+    }
+
+    setSessions(remaining);
+    if (activeSessionId === id) {
+      const next = remaining[remaining.length - 1].session_id;
+      setActiveSessionId(next);
+      saveActiveId(next);
+    }
+  }, [sessions, userId, activeSessionId]);
 
   const renameSession = useCallback(async (id: string, title: string) => {
     const trimmed = title.slice(0, 30);
