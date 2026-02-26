@@ -41,11 +41,16 @@ export function useSessionManager(userId: string = DEFAULT_USER) {
         if (data.length === 0) {
           // No sessions yet — create an initial one
           const id = crypto.randomUUID();
-          const created = await fetch(`${API_BASE}/api/users/${encodeURIComponent(userId)}/sessions`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ session_id: id, title: "Chat 1" }),
-          }).then((r) => r.json()) as Session;
+          let created: Session;
+          try {
+            created = await fetch(`${API_BASE}/api/users/${encodeURIComponent(userId)}/sessions`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ session_id: id, title: "Chat 1" }),
+            }).then((r) => r.json()) as Session;
+          } catch {
+            created = { session_id: id, title: "Chat 1", created_at: Date.now() };
+          }
           setSessions([created]);
           setActiveSessionId(id);
           saveActiveId(id);
@@ -88,7 +93,7 @@ export function useSessionManager(userId: string = DEFAULT_USER) {
       setActiveSessionId(id);
       saveActiveId(id);
     }
-  }, [sessions.length, userId]);
+  }, [sessions, userId]);
 
   const switchSession = useCallback((id: string) => {
     setActiveSessionId(id);
@@ -100,25 +105,47 @@ export function useSessionManager(userId: string = DEFAULT_USER) {
       await fetch(`${API_BASE}/api/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(id)}`, {
         method: "DELETE",
       });
-    } catch { /* ignore — delete optimistically */ }
+    } catch {
+      console.error("deleteSession: network error, proceeding optimistically");
+    }
 
     setSessions((prev) => {
       const remaining = prev.filter((s) => s.session_id !== id);
-      if (remaining.length === 0) {
-        // Will trigger a new session creation on next render via the useEffect
-        return [];
-      }
-      setActiveSessionId((cur) => {
-        if (cur === id) {
-          const next = remaining[remaining.length - 1].session_id;
-          saveActiveId(next);
-          return next;
-        }
-        return cur;
-      });
       return remaining;
     });
-  }, [userId]);
+
+    setActiveSessionId((cur) => {
+      const remaining = sessions.filter((s) => s.session_id !== id);
+      if (remaining.length === 0) {
+        // Create a replacement session asynchronously
+        const newId = crypto.randomUUID();
+        fetch(`${API_BASE}/api/users/${encodeURIComponent(userId)}/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: newId, title: "Chat 1" }),
+        })
+          .then((r) => r.json())
+          .then((created: Session) => {
+            setSessions([created]);
+            setActiveSessionId(newId);
+            saveActiveId(newId);
+          })
+          .catch(() => {
+            const s: Session = { session_id: newId, title: "Chat 1", created_at: Date.now() };
+            setSessions([s]);
+            setActiveSessionId(newId);
+            saveActiveId(newId);
+          });
+        return cur; // will be updated once the async create resolves
+      }
+      if (cur === id) {
+        const next = remaining[remaining.length - 1].session_id;
+        saveActiveId(next);
+        return next;
+      }
+      return cur;
+    });
+  }, [sessions, userId]);
 
   const renameSession = useCallback(async (id: string, title: string) => {
     const trimmed = title.slice(0, 30);
@@ -128,7 +155,9 @@ export function useSessionManager(userId: string = DEFAULT_USER) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: trimmed }),
       });
-    } catch { /* ignore */ }
+    } catch {
+      console.error("renameSession: network error, optimistic update applied");
+    }
     setSessions((prev) =>
       prev.map((s) => (s.session_id === id ? { ...s, title: trimmed } : s))
     );
