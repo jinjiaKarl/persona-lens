@@ -10,18 +10,26 @@ pytestmark = pytest.mark.asyncio
 
 @pytest_asyncio.fixture(autouse=True)
 async def clean_sessions():
-    """Wipe sessions table before each test."""
+    """Wipe sessions table before each test; ensure profile_results exists."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
-                user_id TEXT NOT NULL DEFAULT 'default',
+                user_id    TEXT NOT NULL DEFAULT 'default',
                 session_id TEXT NOT NULL,
-                title TEXT NOT NULL,
+                title      TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 PRIMARY KEY (user_id, session_id)
             )
         """)
-        await db.commit()
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS profile_results (
+                user_id     TEXT NOT NULL DEFAULT 'default',
+                session_id  TEXT NOT NULL,
+                username    TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                PRIMARY KEY (user_id, session_id, username)
+            )
+        """)
         await db.execute("DELETE FROM sessions")
         await db.commit()
     yield

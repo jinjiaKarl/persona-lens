@@ -1,6 +1,7 @@
 """FastAPI server exposing persona_lens analysis as SSE endpoints."""
 import json
 import os
+import time
 from typing import AsyncGenerator
 
 import aiosqlite
@@ -109,6 +110,7 @@ async def _rename_session(user_id: str, session_id: str, title: str) -> dict | N
             (title, user_id, session_id),
         )
         await db.commit()
+        # Re-read after UPDATE to return the fresh row and detect a missing session_id.
         async with db.execute(
             "SELECT session_id, title, created_at FROM sessions WHERE user_id = ? AND session_id = ?",
             (user_id, session_id),
@@ -210,7 +212,6 @@ async def list_sessions(user_id: str):
 @app.post("/api/users/{user_id}/sessions")
 async def create_session(user_id: str, req: CreateSessionRequest):
     """Create a new session. Idempotent — ignores duplicate session_id."""
-    import time
     return await _create_session(user_id, req.session_id, req.title, int(time.time() * 1000))
 
 
