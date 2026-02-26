@@ -26,7 +26,7 @@ app = FastAPI(title="persona-lens API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -50,6 +50,15 @@ async def _create_tables() -> None:
                 PRIMARY KEY (user_id, session_id, username)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                user_id    TEXT NOT NULL DEFAULT 'default',
+                session_id TEXT NOT NULL,
+                title      TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, session_id)
+            )
+        """)
         await db.commit()
 
 
@@ -71,6 +80,56 @@ async def _load_profiles(user_id: str, session_id: str) -> dict[str, dict]:
         ) as cursor:
             rows = await cursor.fetchall()
     return {row[0]: json.loads(row[1]) for row in rows}
+
+
+async def _create_session(user_id: str, session_id: str, title: str, created_at: int) -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO sessions (user_id, session_id, title, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, session_id, title, created_at),
+        )
+        await db.commit()
+    return {"user_id": user_id, "session_id": session_id, "title": title, "created_at": created_at}
+
+
+async def _list_sessions(user_id: str) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT session_id, title, created_at FROM sessions WHERE user_id = ? ORDER BY created_at ASC",
+            (user_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [{"session_id": r[0], "title": r[1], "created_at": r[2]} for r in rows]
+
+
+async def _rename_session(user_id: str, session_id: str, title: str) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE sessions SET title = ? WHERE user_id = ? AND session_id = ?",
+            (title, user_id, session_id),
+        )
+        await db.commit()
+        async with db.execute(
+            "SELECT session_id, title, created_at FROM sessions WHERE user_id = ? AND session_id = ?",
+            (user_id, session_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+    if row is None:
+        return None
+    return {"session_id": row[0], "title": row[1], "created_at": row[2]}
+
+
+async def _delete_session(user_id: str, session_id: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM sessions WHERE user_id = ? AND session_id = ?",
+            (user_id, session_id),
+        )
+        await db.execute(
+            "DELETE FROM profile_results WHERE user_id = ? AND session_id = ?",
+            (user_id, session_id),
+        )
+        await db.commit()
 
 
 # ── Per-session in-memory state ───────────────────────────────────────────────
@@ -132,6 +191,44 @@ def _warm_context(ctx: AgentContext, username: str, result: dict) -> None:
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
+
+class CreateSessionRequest(BaseModel):
+    session_id: str
+    title: str
+
+
+class RenameSessionRequest(BaseModel):
+    title: str
+
+
+@app.get("/api/users/{user_id}/sessions")
+async def list_sessions(user_id: str):
+    """List all sessions for a user, ordered by creation time."""
+    return await _list_sessions(user_id)
+
+
+@app.post("/api/users/{user_id}/sessions")
+async def create_session(user_id: str, req: CreateSessionRequest):
+    """Create a new session. Idempotent — ignores duplicate session_id."""
+    import time
+    return await _create_session(user_id, req.session_id, req.title, int(time.time() * 1000))
+
+
+@app.patch("/api/users/{user_id}/sessions/{session_id}")
+async def rename_session(user_id: str, session_id: str, req: RenameSessionRequest):
+    """Rename an existing session."""
+    result = await _rename_session(user_id, session_id, req.title)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return result
+
+
+@app.delete("/api/users/{user_id}/sessions/{session_id}")
+async def delete_session(user_id: str, session_id: str):
+    """Delete a session and all its stored profiles."""
+    await _delete_session(user_id, session_id)
+    return {"deleted": session_id}
+
 
 @app.get("/api/sessions/{session_id}/profiles")
 async def get_profiles(session_id: str, user_id: str = "default"):
