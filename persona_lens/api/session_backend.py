@@ -11,6 +11,8 @@ import os
 from typing import Protocol, runtime_checkable
 
 from agents.extensions.memory import SQLAlchemySession
+from agents.models.chatcmpl_converter import Converter
+from acontext import AcontextClient
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 
@@ -54,6 +56,63 @@ class SQLiteBackend:
             await self._sa.add_items(new_items)
 
 
+# ── AcontextBackend ───────────────────────────────────────────────────────────
+
+# Singleton client — initialised lazily so missing API key fails at runtime, not import.
+_ac_client: AcontextClient | None = None
+
+
+def _get_ac_client() -> AcontextClient:
+    global _ac_client
+    if _ac_client is None:
+        api_key = os.getenv("ACONTEXT_API_KEY")
+        base_url = os.getenv("ACONTEXT_BASE_URL")  # None = use hosted default
+        kwargs: dict = {"api_key": api_key}
+        if base_url:
+            kwargs["base_url"] = base_url
+        _ac_client = AcontextClient(**kwargs)
+    return _ac_client
+
+
+class AcontextBackend:
+    """Stores chat history in acontext Sessions API."""
+
+    def __init__(self, session_key: str) -> None:
+        # session_key is "user_id:session_id" — used as acontext session ID.
+        self._session_key = session_key
+        self._session_created = False
+
+    async def get_history(self) -> list:
+        client = _get_ac_client()
+        try:
+            response = client.sessions.get_messages(self._session_key, format="openai")
+            # Each item in response.items is an OpenAI-format message dict.
+            return [item for item in response.items] if response.items else []
+        except Exception:
+            # Session doesn't exist yet or other transient error → empty history.
+            return []
+
+    async def save_messages(self, new_items: list) -> None:
+        if not new_items:
+            return
+        client = _get_ac_client()
+
+        # Ensure session exists (idempotent).
+        if not self._session_created:
+            try:
+                client.sessions.create(use_uuid=self._session_key)
+            except Exception:
+                pass  # Already exists — ignore.
+            self._session_created = True
+
+        # Convert from TResponseInputItem format to OpenAI messages.
+        messages = Converter.items_to_messages(new_items)
+        for msg in messages:
+            client.sessions.store_message(
+                session_id=self._session_key, blob=msg, format="openai"
+            )
+
+
 # ── Factory ───────────────────────────────────────────────────────────────────
 
 # Module-level caches — one entry per (user_id, session_id) key.
@@ -83,7 +142,6 @@ def make_session(session_key: str, *, engine: AsyncEngine | None = None) -> "Cha
             raise ValueError(
                 "SESSION_BACKEND=acontext requires ACONTEXT_API_KEY to be set"
             )
-        from persona_lens.api.session_backend import AcontextBackend  # noqa: PLC0415
         return AcontextBackend(session_key)
 
     raise ValueError(f"Unknown SESSION_BACKEND={backend!r}. Use 'sqlite' or 'acontext'.")
