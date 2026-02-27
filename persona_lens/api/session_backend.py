@@ -7,8 +7,11 @@ Toggle via SESSION_BACKEND env var:
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Protocol, runtime_checkable
+
+_log = logging.getLogger(__name__)
 
 from agents.extensions.memory import SQLAlchemySession
 from agents.models.chatcmpl_converter import Converter
@@ -89,8 +92,10 @@ class AcontextBackend:
             response = await client.sessions.get_messages(self._session_id, format="openai")
             # Each item in response.items is an OpenAI-format message dict.
             return list(response.items) if response.items else []
-        except Exception:
-            # Session doesn't exist yet or other transient error → empty history.
+        except Exception as exc:
+            # Session doesn't exist yet → empty history (expected on first turn).
+            # Any other error is logged so it doesn't silently disappear.
+            _log.warning("acontext get_history failed (session=%s): %s", self._session_id, exc)
             return []
 
     async def save_messages(self, new_items: list) -> None:
@@ -105,16 +110,21 @@ class AcontextBackend:
                 if self._user_id:
                     kwargs["user"] = self._user_id
                 await client.sessions.create(**kwargs)
-            except Exception:
-                pass  # Already exists — ignore.
+            except Exception as exc:
+                # Session may already exist — log and continue rather than aborting.
+                _log.warning("acontext session create failed (session=%s): %s", self._session_id, exc)
             self._session_created = True
 
         # Convert from TResponseInputItem format to OpenAI messages.
         messages = Converter.items_to_messages(new_items)
         for msg in messages:
-            await client.sessions.store_message(
-                session_id=self._session_id, blob=msg, format="openai"
-            )
+            try:
+                await client.sessions.store_message(
+                    session_id=self._session_id, blob=msg, format="openai"
+                )
+            except Exception as exc:
+                _log.error("acontext store_message failed (session=%s): %s", self._session_id, exc)
+                raise
 
 
 # ── Factory ───────────────────────────────────────────────────────────────────
