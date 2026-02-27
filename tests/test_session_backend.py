@@ -45,14 +45,14 @@ async def test_acontext_get_history_returns_empty_when_no_messages():
     os.environ["ACONTEXT_API_KEY"] = "sk-ac-test"
 
     with patch("persona_lens.api.session_backend._ac_client", None), \
-         patch("persona_lens.api.session_backend.AcontextClient") as MockClient:
+         patch("persona_lens.api.session_backend.AcontextAsyncClient") as MockClient:
         mock_client = MagicMock()
         MockClient.return_value = mock_client
 
         # Simulate empty message list
         mock_response = MagicMock()
         mock_response.items = []
-        mock_client.sessions.get_messages.return_value = mock_response
+        mock_client.sessions.get_messages = AsyncMock(return_value=mock_response)
 
         from persona_lens.api.session_backend import AcontextBackend
         backend = AcontextBackend("user:sess-1")
@@ -67,13 +67,13 @@ async def test_acontext_save_messages_stores_converted_messages():
     os.environ["ACONTEXT_API_KEY"] = "sk-ac-test"
 
     with patch("persona_lens.api.session_backend._ac_client", None), \
-         patch("persona_lens.api.session_backend.AcontextClient") as MockClient, \
+         patch("persona_lens.api.session_backend.AcontextAsyncClient") as MockClient, \
          patch("persona_lens.api.session_backend.Converter") as MockConverter:
 
         mock_client = MagicMock()
         MockClient.return_value = mock_client
-        mock_client.sessions.create = MagicMock()
-        mock_client.sessions.store_message = MagicMock()
+        mock_client.sessions.create = AsyncMock()
+        mock_client.sessions.store_message = AsyncMock()
 
         converted_msgs = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
         MockConverter.items_to_messages.return_value = converted_msgs
