@@ -77,9 +77,10 @@ async def _get_ac_client() -> AcontextAsyncClient:
 class AcontextBackend:
     """Stores chat history in acontext Sessions API."""
 
-    def __init__(self, session_key: str) -> None:
+    def __init__(self, session_key: str, *, user_id: str | None = None) -> None:
         # session_key is "user_id:session_id" — used as acontext session ID.
         self._session_key = session_key
+        self._user_id = user_id  # bound to acontext user for multi-tenant isolation
         self._session_created = False
 
     async def get_history(self) -> list:
@@ -100,7 +101,10 @@ class AcontextBackend:
         # Ensure session exists (idempotent).
         if not self._session_created:
             try:
-                await client.sessions.create(use_uuid=self._session_key)
+                kwargs: dict = {"use_uuid": self._session_key}
+                if self._user_id:
+                    kwargs["user"] = self._user_id
+                await client.sessions.create(**kwargs)
             except Exception:
                 pass  # Already exists — ignore.
             self._session_created = True
@@ -120,11 +124,19 @@ _sqlite_backends: dict[str, SQLiteBackend] = {}
 _acontext_backends: dict[str, AcontextBackend] = {}
 
 
-def make_session(session_key: str, *, engine: AsyncEngine | None = None) -> "ChatSession":
+def make_session(
+    session_key: str,
+    *,
+    engine: AsyncEngine | None = None,
+    user_id: str | None = None,
+) -> "ChatSession":
     """Return the appropriate ChatSession for the given key.
 
     session_key should be the composite "user_id:session_id" string used
     throughout server.py.
+
+    user_id is passed to AcontextBackend to bind the session to an acontext
+    user, enabling per-user isolation and cascade delete.
 
     Raises ValueError if SESSION_BACKEND=acontext but ACONTEXT_API_KEY is unset.
     """
@@ -144,7 +156,7 @@ def make_session(session_key: str, *, engine: AsyncEngine | None = None) -> "Cha
                 "SESSION_BACKEND=acontext requires ACONTEXT_API_KEY to be set"
             )
         if session_key not in _acontext_backends:
-            _acontext_backends[session_key] = AcontextBackend(session_key)
+            _acontext_backends[session_key] = AcontextBackend(session_key, user_id=user_id)
         return _acontext_backends[session_key]
 
     raise ValueError(f"Unknown SESSION_BACKEND={backend!r}. Use 'sqlite' or 'acontext'.")
