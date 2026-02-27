@@ -62,6 +62,13 @@ async def _create_tables() -> None:
         """)
         await db.commit()
 
+    backend = os.getenv("SESSION_BACKEND", "sqlite").lower()
+    if backend == "acontext":
+        base_url = os.getenv("ACONTEXT_BASE_URL", "https://api.acontext.app/api/v1")
+        print(f"[session] backend=acontext  url={base_url}")
+    else:
+        print(f"[session] backend=sqlite  db={DB_PATH}")
+
 
 async def _save_profile(user_id: str, session_id: str, username: str, result: dict) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
