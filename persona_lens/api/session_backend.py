@@ -16,6 +16,7 @@ _log = logging.getLogger(__name__)
 from agents.extensions.memory import SQLAlchemySession
 from agents.models.chatcmpl_converter import Converter
 from acontext import AcontextAsyncClient
+from acontext.errors import APIError as AcontextAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 
@@ -110,10 +111,17 @@ class AcontextBackend:
                 if self._user_id:
                     kwargs["user"] = self._user_id
                 await client.sessions.create(**kwargs)
+                self._session_created = True
+            except AcontextAPIError as exc:
+                if exc.status_code == 409:
+                    # Session already exists — that's fine, proceed to store.
+                    self._session_created = True
+                else:
+                    _log.error("acontext session create failed (session=%s): %s", self._session_id, exc)
+                    raise
             except Exception as exc:
-                # Session may already exist — log and continue rather than aborting.
-                _log.warning("acontext session create failed (session=%s): %s", self._session_id, exc)
-            self._session_created = True
+                _log.error("acontext session create failed (session=%s): %s", self._session_id, exc)
+                raise
 
         # Convert from TResponseInputItem format to OpenAI messages.
         messages = Converter.items_to_messages(new_items)
