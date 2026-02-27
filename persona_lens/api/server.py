@@ -2,6 +2,10 @@
 import json
 import os
 import time
+
+from dotenv import load_dotenv
+
+load_dotenv()
 from typing import AsyncGenerator
 
 import aiosqlite
