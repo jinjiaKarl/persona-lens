@@ -1,7 +1,7 @@
 // frontend/hooks/use-chat.ts
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { ChatState, ChatMessage, AnalysisResult } from "@/lib/types";
 
 const API_BASE = "http://localhost:8000";
@@ -30,6 +30,42 @@ export function useChat({ sessionId, userId = "default", onAnalysisResult }: Use
     messages: [WELCOME],
     isStreaming: false,
   });
+
+  // Load existing chat history from backend when session changes
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+
+    async function loadHistory() {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(sessionId)}/messages`
+        );
+        if (!res.ok || cancelled) return;
+        const items: Array<{
+          role: string;
+          content: string;
+          toolCalls: Array<{ tool: string; status: "done" }>;
+        }> = await res.json();
+        if (cancelled || items.length === 0) return;
+
+        const history: ChatMessage[] = items.map((item) => ({
+          id: makeId(),
+          role: item.role as ChatMessage["role"],
+          content: item.content,
+          isStreaming: false,
+          toolCalls: item.toolCalls,
+        }));
+
+        setState({ messages: history, isStreaming: false });
+      } catch {
+        // Backend not reachable — keep welcome message
+      }
+    }
+
+    loadHistory();
+    return () => { cancelled = true; };
+  }, [sessionId, userId]);
 
   const sendMessage = useCallback(
     async (text: string) => {
