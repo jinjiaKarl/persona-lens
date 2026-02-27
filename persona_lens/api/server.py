@@ -148,7 +148,9 @@ def _items_to_display_messages(items: list) -> list[dict]:
 
         item_type = item.get("type", "")
 
-        if item_type == "message":
+        # Handle both typed messages {"type": "message", "role": "..."} and
+        # EasyInputMessageParam (no "type" field) {"role": "user", "content": "..."}.
+        if item_type == "message" or (not item_type and "role" in item):
             role = item.get("role", "")
             content = item.get("content", "")
 

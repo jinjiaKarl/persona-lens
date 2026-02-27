@@ -26,9 +26,10 @@ async def test_history_converts_user_and_agent_messages(client):
     session = await get_chat_session("default", "hist-test-1")
     # Clear any stale data from previous runs before testing.
     await session.clear_session()
-    # Add a user message and an assistant response the same way the SDK does
+    # Add a user message (EasyInputMessageParam — no "type" field, matches real SDK storage)
+    # and an assistant response (typed message).
     await session.add_items([
-        {"type": "message", "role": "user", "content": "Hello"},
+        {"role": "user", "content": "Hello"},
         {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Hi there!"}]},
     ])
 
@@ -51,7 +52,7 @@ async def test_history_attaches_tool_calls_to_agent_message(client):
     # Clear any stale data from previous runs before testing.
     await session.clear_session()
     await session.add_items([
-        {"type": "message", "role": "user", "content": "Analyze @karpathy"},
+        {"role": "user", "content": "Analyze @karpathy"},
         {"type": "function_call", "name": "fetch_user", "call_id": "c1", "arguments": "{}"},
         {"type": "function_call", "name": "analyze_user", "call_id": "c2", "arguments": "{}"},
         {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Done!"}]},
@@ -79,7 +80,7 @@ async def test_history_isolated_across_users(client):
     # Clear any stale data from previous runs before testing.
     await session.clear_session()
     await session.add_items([
-        {"type": "message", "role": "user", "content": "Secret"},
+        {"role": "user", "content": "Secret"},
     ])
 
     async with client as c:
