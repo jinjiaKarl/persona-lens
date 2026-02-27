@@ -12,11 +12,11 @@ from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from agents import Runner
-from agents.extensions.memory import SQLAlchemySession
 from openai.types.responses import ResponseTextDeltaEvent
 
 from persona_lens.agent.context import AgentContext
 from persona_lens.agent.loop import main_agent
+from persona_lens.api.session_backend import make_session
 from persona_lens.platforms.x.fetcher import fetch_snapshot
 from persona_lens.platforms.x.parser import extract_tweet_data, extract_user_info
 from persona_lens.platforms.x.analyzer import analyze_user_profile
@@ -192,7 +192,6 @@ def _items_to_display_messages(items: list) -> list[dict]:
 # Keyed by "user_id:session_id" to ensure isolation across tenants.
 
 _contexts: dict[str, AgentContext] = {}
-_chat_sessions: dict[str, SQLAlchemySession] = {}
 
 
 def _ctx_key(user_id: str, session_id: str) -> str:
@@ -204,15 +203,6 @@ def get_context(user_id: str, session_id: str) -> AgentContext:
     if key not in _contexts:
         _contexts[key] = AgentContext()
     return _contexts[key]
-
-
-async def get_chat_session(user_id: str, session_id: str) -> SQLAlchemySession:
-    key = _ctx_key(user_id, session_id)
-    if key not in _chat_sessions:
-        _chat_sessions[key] = SQLAlchemySession(
-            key, engine=_engine, create_tables=True
-        )
-    return _chat_sessions[key]
 
 
 def _warm_context(ctx: AgentContext, username: str, result: dict) -> None:
@@ -288,9 +278,9 @@ async def delete_session(user_id: str, session_id: str):
 @app.get("/api/users/{user_id}/sessions/{session_id}/messages")
 async def get_chat_history(user_id: str, session_id: str):
     """Return the full chat history for a session in display format."""
-    session = await get_chat_session(user_id, session_id)
-    items = await session.get_items()
-    return _items_to_display_messages(items)
+    session = make_session(_ctx_key(user_id, session_id), engine=_engine)
+    history = await session.get_history()
+    return _items_to_display_messages(history)
 
 
 @app.get("/api/sessions/{session_id}/profiles")
@@ -408,19 +398,25 @@ class ChatRequest(BaseModel):
 async def chat(req: ChatRequest):
     """Stream chat responses from the main agent via SSE."""
     ctx = get_context(req.user_id, req.session_id)
-    session = await get_chat_session(req.user_id, req.session_id)
+    session = make_session(_ctx_key(req.user_id, req.session_id), engine=_engine)
 
     async def _generate() -> AsyncGenerator[dict, None]:
         before_analyses: set[str] = set(ctx.analysis_cache.get("x", {}).keys())
 
         try:
+            # 1. Load history, build full input.
+            history = await session.get_history()
+            full_input = list(history) + [{"role": "user", "content": req.message}]
+            history_len = len(history)
+
+            # 2. Run agent (no session= arg — we manage history manually).
             result = Runner.run_streamed(
                 main_agent,
-                input=req.message,
+                input=full_input,
                 context=ctx,
-                session=session,
             )
 
+            # 3. Stream events.
             async for event in result.stream_events():
                 if event.type == "raw_response_event":
                     if isinstance(event.data, ResponseTextDeltaEvent):
@@ -442,7 +438,12 @@ async def chat(req: ChatRequest):
                                 "data": json.dumps({"tool": tool_name, "status": "running"}),
                             }
 
-            # Emit analysis_result for newly analyzed users and persist them.
+            # 4. Persist new turn (user msg + agent response).
+            all_items = result.to_input_list()
+            new_items = all_items[history_len:]  # slice off prior history
+            await session.save_messages(new_items)
+
+            # 5. Emit analysis_result for newly analyzed users and persist them.
             after_analyses: set[str] = set(ctx.analysis_cache.get("x", {}).keys())
             new_users = after_analyses - before_analyses
             for username in new_users:

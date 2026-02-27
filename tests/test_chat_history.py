@@ -1,7 +1,8 @@
 """Tests for GET /api/users/{user_id}/sessions/{session_id}/messages endpoint."""
 import pytest
 from httpx import AsyncClient, ASGITransport
-from persona_lens.api.server import app
+from agents.extensions.memory import SQLAlchemySession
+from persona_lens.api.server import app, _engine
 
 pytestmark = pytest.mark.asyncio
 
@@ -21,9 +22,7 @@ async def test_empty_history_returns_empty_list(client):
 
 async def test_history_converts_user_and_agent_messages(client):
     """Simulate the SDK storing messages, then verify the endpoint converts them."""
-    from persona_lens.api.server import get_chat_session
-
-    session = await get_chat_session("default", "hist-test-1")
+    session = SQLAlchemySession("default:hist-test-1", engine=_engine, create_tables=True)
     # Clear any stale data from previous runs before testing.
     await session.clear_session()
     # Add a user message (EasyInputMessageParam — no "type" field, matches real SDK storage)
@@ -46,9 +45,7 @@ async def test_history_converts_user_and_agent_messages(client):
 
 async def test_history_attaches_tool_calls_to_agent_message(client):
     """Tool call items should be collected and attached to the following agent message."""
-    from persona_lens.api.server import get_chat_session
-
-    session = await get_chat_session("default", "hist-test-2")
+    session = SQLAlchemySession("default:hist-test-2", engine=_engine, create_tables=True)
     # Clear any stale data from previous runs before testing.
     await session.clear_session()
     await session.add_items([
@@ -74,9 +71,7 @@ async def test_history_attaches_tool_calls_to_agent_message(client):
 
 async def test_history_isolated_across_users(client):
     """Messages for user-a are not visible to user-b."""
-    from persona_lens.api.server import get_chat_session
-
-    session = await get_chat_session("user-a", "shared-session")
+    session = SQLAlchemySession("user-a:shared-session", engine=_engine, create_tables=True)
     # Clear any stale data from previous runs before testing.
     await session.clear_session()
     await session.add_items([
