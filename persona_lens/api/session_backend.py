@@ -77,16 +77,16 @@ async def _get_ac_client() -> AcontextAsyncClient:
 class AcontextBackend:
     """Stores chat history in acontext Sessions API."""
 
-    def __init__(self, session_key: str, *, user_id: str | None = None) -> None:
-        # session_key is "user_id:session_id" — used as acontext session ID.
-        self._session_key = session_key
-        self._user_id = user_id  # bound to acontext user for multi-tenant isolation
+    def __init__(self, session_key: str, *, session_id: str, user_id: str | None = None) -> None:
+        self._session_key = session_key  # cache key only ("user_id:session_id")
+        self._session_id = session_id    # actual UUID used for acontext API calls
+        self._user_id = user_id          # bound to acontext user for multi-tenant isolation
         self._session_created = False
 
     async def get_history(self) -> list:
         client = await _get_ac_client()
         try:
-            response = await client.sessions.get_messages(self._session_key, format="openai")
+            response = await client.sessions.get_messages(self._session_id, format="openai")
             # Each item in response.items is an OpenAI-format message dict.
             return list(response.items) if response.items else []
         except Exception:
@@ -101,7 +101,7 @@ class AcontextBackend:
         # Ensure session exists (idempotent).
         if not self._session_created:
             try:
-                kwargs: dict = {"use_uuid": self._session_key}
+                kwargs: dict = {"use_uuid": self._session_id}
                 if self._user_id:
                     kwargs["user"] = self._user_id
                 await client.sessions.create(**kwargs)
@@ -113,7 +113,7 @@ class AcontextBackend:
         messages = Converter.items_to_messages(new_items)
         for msg in messages:
             await client.sessions.store_message(
-                session_id=self._session_key, blob=msg, format="openai"
+                session_id=self._session_id, blob=msg, format="openai"
             )
 
 
@@ -128,15 +128,14 @@ def make_session(
     session_key: str,
     *,
     engine: AsyncEngine | None = None,
+    session_id: str | None = None,
     user_id: str | None = None,
 ) -> "ChatSession":
     """Return the appropriate ChatSession for the given key.
 
-    session_key should be the composite "user_id:session_id" string used
-    throughout server.py.
-
-    user_id is passed to AcontextBackend to bind the session to an acontext
-    user, enabling per-user isolation and cascade delete.
+    session_key — composite "user_id:session_id", used as cache key.
+    session_id  — the raw UUID from the frontend, used as the acontext session ID.
+    user_id     — passed to AcontextBackend for per-user isolation in acontext.
 
     Raises ValueError if SESSION_BACKEND=acontext but ACONTEXT_API_KEY is unset.
     """
@@ -155,8 +154,11 @@ def make_session(
             raise ValueError(
                 "SESSION_BACKEND=acontext requires ACONTEXT_API_KEY to be set"
             )
+        ac_session_id = session_id or session_key  # fall back to session_key if not provided
         if session_key not in _acontext_backends:
-            _acontext_backends[session_key] = AcontextBackend(session_key, user_id=user_id)
+            _acontext_backends[session_key] = AcontextBackend(
+                session_key, session_id=ac_session_id, user_id=user_id
+            )
         return _acontext_backends[session_key]
 
     raise ValueError(f"Unknown SESSION_BACKEND={backend!r}. Use 'sqlite' or 'acontext'.")

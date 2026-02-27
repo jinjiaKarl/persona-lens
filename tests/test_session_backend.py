@@ -55,7 +55,7 @@ async def test_acontext_get_history_returns_empty_when_no_messages():
         mock_client.sessions.get_messages = AsyncMock(return_value=mock_response)
 
         from persona_lens.api.session_backend import AcontextBackend
-        backend = AcontextBackend("user:sess-1")
+        backend = AcontextBackend("user:sess-1", session_id="sess-1")
         history = await backend.get_history()
 
     assert history == []
@@ -79,7 +79,7 @@ async def test_acontext_save_messages_stores_converted_messages():
         MockConverter.items_to_messages.return_value = converted_msgs
 
         from persona_lens.api.session_backend import AcontextBackend
-        backend = AcontextBackend("user:sess-2")
+        backend = AcontextBackend("user:sess-2", session_id="sess-2")
         await backend.save_messages([{"role": "user", "content": "hi"}])
 
     assert mock_client.sessions.store_message.call_count == 2

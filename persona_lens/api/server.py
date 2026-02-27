@@ -289,7 +289,7 @@ async def delete_session(user_id: str, session_id: str):
 @app.get("/api/users/{user_id}/sessions/{session_id}/messages")
 async def get_chat_history(user_id: str, session_id: str):
     """Return the full chat history for a session in display format."""
-    session = make_session(_ctx_key(user_id, session_id), engine=_engine, user_id=user_id)
+    session = make_session(_ctx_key(user_id, session_id), engine=_engine, user_id=user_id, session_id=session_id)
     history = await session.get_history()
     return _items_to_display_messages(history)
 
@@ -409,7 +409,7 @@ class ChatRequest(BaseModel):
 async def chat(req: ChatRequest):
     """Stream chat responses from the main agent via SSE."""
     ctx = get_context(req.user_id, req.session_id)
-    session = make_session(_ctx_key(req.user_id, req.session_id), engine=_engine, user_id=req.user_id)
+    session = make_session(_ctx_key(req.user_id, req.session_id), engine=_engine, user_id=req.user_id, session_id=req.session_id)
 
     async def _generate() -> AsyncGenerator[dict, None]:
         before_analyses: set[str] = set(ctx.analysis_cache.get("x", {}).keys())
