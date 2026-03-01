@@ -48,6 +48,7 @@ async def test_acontext_get_history_returns_empty_when_no_messages():
          patch("persona_lens.api.session_backend.AcontextAsyncClient") as MockClient:
         mock_client = MagicMock()
         MockClient.return_value = mock_client
+        mock_client.ping = AsyncMock()
 
         # Simulate empty message list
         mock_response = MagicMock()
@@ -72,6 +73,7 @@ async def test_acontext_save_messages_stores_converted_messages():
 
         mock_client = MagicMock()
         MockClient.return_value = mock_client
+        mock_client.ping = AsyncMock()
         mock_client.sessions.create = AsyncMock()
         mock_client.sessions.store_message = AsyncMock()
 

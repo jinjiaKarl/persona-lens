@@ -75,6 +75,7 @@ async def _get_ac_client() -> AcontextAsyncClient:
         if base_url:
             kwargs["base_url"] = base_url
         _ac_client = AcontextAsyncClient(**kwargs)
+        await _ac_client.ping()
     return _ac_client
 
 
