@@ -458,11 +458,12 @@ async def chat(req: ChatRequest):
             await session.save_messages(new_items)
 
             # Log prompt-cache efficiency (cached_tokens / input_tokens).
-            usage = getattr(result, "usage", None)
-            if usage:
-                total_in = getattr(usage, "input_tokens", 0) or 0
-                details = getattr(usage, "input_tokens_details", None)
-                cached = getattr(details, "cached_tokens", 0) or 0
+            if result.raw_responses:
+                total_in = sum(r.usage.input_tokens for r in result.raw_responses)
+                cached = sum(
+                    (r.usage.input_tokens_details.cached_tokens or 0)
+                    for r in result.raw_responses
+                )
                 _log.info(
                     "[cache] input=%d  cached=%d  (%.0f%%)",
                     total_in, cached,
