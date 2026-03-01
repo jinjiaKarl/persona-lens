@@ -27,11 +27,11 @@ class ChatSession(Protocol):
     """Minimal interface for a per-session chat history store."""
 
     async def get_history(self) -> list:
-        """Return all stored messages as a list usable as Runner input.
+        """Return all stored messages as list[TResponseInputItem] for Runner input.
 
-        SQLiteBackend returns list[TResponseInputItem].
-        AcontextBackend returns list[dict] (OpenAI message format).
-        Both are accepted by Runner.run_streamed(input=...).
+        SQLiteBackend returns items stored natively by SQLAlchemySession.
+        AcontextBackend stores in OpenAI Chat format, then converts back to
+        Responses API format (function_call / function_call_output items) on load.
         """
         ...
 
@@ -58,6 +58,62 @@ class SQLiteBackend:
     async def save_messages(self, new_items: list) -> None:
         if new_items:
             await self._sa.add_items(new_items)
+
+
+# ── Format conversion ────────────────────────────────────────────────────────
+
+def _chatcmpl_to_input_items(messages: list) -> list:
+    """Convert OpenAI Chat Completions messages → Responses API input items.
+
+    Converter.items_to_messages() produces Chat Completions format:
+      assistant: {role, content, tool_calls:[{id, function:{name,arguments}}]}
+      tool:      {role:"tool", content, tool_call_id}
+
+    The Responses API (used by Runner) expects:
+      function call:   {type:"function_call", name, arguments, call_id}
+      function output: {type:"function_call_output", call_id, output}
+      text messages:   {role, content}   ← EasyInputMessageParam, accepted as-is
+    """
+    result = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            result.append(msg)
+            continue
+
+        role = msg.get("role", "")
+        content = msg.get("content") or ""
+
+        if role in ("user", "system", "developer"):
+            result.append({"role": role, "content": content})
+
+        elif role == "assistant":
+            tool_calls = msg.get("tool_calls") or []
+            if tool_calls:
+                # Emit text content first (if any), then each tool call separately.
+                if content:
+                    result.append({
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": content}],
+                    })
+                for tc in tool_calls:
+                    result.append({
+                        "type": "function_call",
+                        "name": tc["function"]["name"],
+                        "arguments": tc["function"]["arguments"],
+                        "call_id": tc["id"],
+                    })
+            else:
+                result.append({"role": "assistant", "content": content})
+
+        elif role == "tool":
+            result.append({
+                "type": "function_call_output",
+                "call_id": msg.get("tool_call_id", ""),
+                "output": content,
+            })
+
+    return result
 
 
 # ── AcontextBackend ───────────────────────────────────────────────────────────
@@ -93,12 +149,9 @@ class AcontextBackend:
         try:
             response = await client.sessions.get_messages(self._session_id, format="openai")
             messages = list(response.items) if response.items else []
-            # OpenAI chat format allows content=null on assistant messages that only
-            # carry tool_calls, but the Responses API (used by Runner) rejects null.
-            for msg in messages:
-                if isinstance(msg, dict) and msg.get("content") is None:
-                    msg["content"] = ""
-            return messages
+            # Stored in OpenAI Chat Completions format; convert to Responses API
+            # input format before returning so Runner.run_streamed() accepts it.
+            return _chatcmpl_to_input_items(messages)
         except Exception as exc:
             # Session doesn't exist yet → empty history (expected on first turn).
             # Any other error is logged so it doesn't silently disappear.
