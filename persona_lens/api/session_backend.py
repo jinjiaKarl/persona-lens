@@ -91,8 +91,13 @@ class AcontextBackend:
         client = await _get_ac_client()
         try:
             response = await client.sessions.get_messages(self._session_id, format="openai")
-            # Each item in response.items is an OpenAI-format message dict.
-            return list(response.items) if response.items else []
+            messages = list(response.items) if response.items else []
+            # OpenAI chat format allows content=null on assistant messages that only
+            # carry tool_calls, but the Responses API (used by Runner) rejects null.
+            for msg in messages:
+                if isinstance(msg, dict) and msg.get("content") is None:
+                    msg["content"] = ""
+            return messages
         except Exception as exc:
             # Session doesn't exist yet → empty history (expected on first turn).
             # Any other error is logged so it doesn't silently disappear.
