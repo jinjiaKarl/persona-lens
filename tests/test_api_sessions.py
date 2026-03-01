@@ -1,7 +1,9 @@
 """Tests for per-session isolation in the API server."""
 
 import pytest
-from persona_lens.api.server import get_context, _contexts, _chat_sessions
+from persona_lens.api.server import get_context, _contexts
+from persona_lens.api.session_backend import make_session, _sqlite_backends
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 def test_get_context_creates_new_for_unknown_session():
@@ -25,22 +27,20 @@ def test_get_context_isolates_across_users():
     assert ctx_u1 is not ctx_u2
 
 
-@pytest.mark.asyncio
-async def test_get_chat_session_creates_isolated_sessions():
-    from persona_lens.api.server import get_chat_session
-    _chat_sessions.clear()
-    s1 = await get_chat_session("user-1", "chat-1")
-    s2 = await get_chat_session("user-1", "chat-2")
+def test_make_session_creates_isolated_sessions():
+    _sqlite_backends.clear()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    s1 = make_session("user-1:chat-1", engine=engine)
+    s2 = make_session("user-1:chat-2", engine=engine)
     assert s1 is not s2
-    # Same user+session returns same instance
-    s1_again = await get_chat_session("user-1", "chat-1")
+    # Same key returns same instance
+    s1_again = make_session("user-1:chat-1", engine=engine)
     assert s1 is s1_again
 
 
-@pytest.mark.asyncio
-async def test_get_chat_session_isolates_across_users():
-    from persona_lens.api.server import get_chat_session
-    _chat_sessions.clear()
-    s_u1 = await get_chat_session("user-1", "chat-x")
-    s_u2 = await get_chat_session("user-2", "chat-x")
+def test_make_session_isolates_across_users():
+    _sqlite_backends.clear()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    s_u1 = make_session("user-1:chat-x", engine=engine)
+    s_u2 = make_session("user-2:chat-x", engine=engine)
     assert s_u1 is not s_u2

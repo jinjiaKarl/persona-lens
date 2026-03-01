@@ -1,7 +1,14 @@
 """FastAPI server exposing persona_lens analysis as SSE endpoints."""
 import json
+import logging
 import os
 import time
+
+_log = logging.getLogger(__name__)
+
+from dotenv import load_dotenv
+
+load_dotenv()
 from typing import AsyncGenerator
 
 import aiosqlite
@@ -12,11 +19,11 @@ from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from agents import Runner
-from agents.extensions.memory import SQLAlchemySession
 from openai.types.responses import ResponseTextDeltaEvent
 
 from persona_lens.agent.context import AgentContext
 from persona_lens.agent.loop import main_agent
+from persona_lens.api.session_backend import make_session
 from persona_lens.platforms.x.fetcher import fetch_snapshot
 from persona_lens.platforms.x.parser import extract_tweet_data, extract_user_info
 from persona_lens.platforms.x.analyzer import analyze_user_profile
@@ -37,6 +44,20 @@ app.add_middleware(
 
 DB_PATH = os.getenv("DB_PATH", "persona_lens.db")
 _engine = create_async_engine(f"sqlite+aiosqlite:///{DB_PATH}")
+
+
+@app.on_event("startup")
+async def _start_camofox() -> None:
+    import asyncio
+    from persona_lens.utils.docker import ensure_camofox_running
+    await asyncio.to_thread(ensure_camofox_running)
+
+
+@app.on_event("shutdown")
+async def _stop_camofox() -> None:
+    import asyncio
+    from persona_lens.utils.docker import stop_camofox_if_started
+    await asyncio.to_thread(stop_camofox_if_started)
 
 
 @app.on_event("startup")
@@ -61,6 +82,13 @@ async def _create_tables() -> None:
             )
         """)
         await db.commit()
+
+    backend = os.getenv("SESSION_BACKEND", "sqlite").lower()
+    if backend == "acontext":
+        base_url = os.getenv("ACONTEXT_BASE_URL", "https://api.acontext.app/api/v1")
+        print(f"[session] backend=acontext  url={base_url}")
+    else:
+        print(f"[session] backend=sqlite  db={DB_PATH}")
 
 
 async def _save_profile(user_id: str, session_id: str, username: str, result: dict) -> None:
@@ -192,7 +220,6 @@ def _items_to_display_messages(items: list) -> list[dict]:
 # Keyed by "user_id:session_id" to ensure isolation across tenants.
 
 _contexts: dict[str, AgentContext] = {}
-_chat_sessions: dict[str, SQLAlchemySession] = {}
 
 
 def _ctx_key(user_id: str, session_id: str) -> str:
@@ -204,15 +231,6 @@ def get_context(user_id: str, session_id: str) -> AgentContext:
     if key not in _contexts:
         _contexts[key] = AgentContext()
     return _contexts[key]
-
-
-async def get_chat_session(user_id: str, session_id: str) -> SQLAlchemySession:
-    key = _ctx_key(user_id, session_id)
-    if key not in _chat_sessions:
-        _chat_sessions[key] = SQLAlchemySession(
-            key, engine=_engine, create_tables=True
-        )
-    return _chat_sessions[key]
 
 
 def _warm_context(ctx: AgentContext, username: str, result: dict) -> None:
@@ -288,9 +306,9 @@ async def delete_session(user_id: str, session_id: str):
 @app.get("/api/users/{user_id}/sessions/{session_id}/messages")
 async def get_chat_history(user_id: str, session_id: str):
     """Return the full chat history for a session in display format."""
-    session = await get_chat_session(user_id, session_id)
-    items = await session.get_items()
-    return _items_to_display_messages(items)
+    session = make_session(_ctx_key(user_id, session_id), engine=_engine, user_id=user_id, session_id=session_id)
+    history = await session.get_history()
+    return _items_to_display_messages(history)
 
 
 @app.get("/api/sessions/{session_id}/profiles")
@@ -408,19 +426,25 @@ class ChatRequest(BaseModel):
 async def chat(req: ChatRequest):
     """Stream chat responses from the main agent via SSE."""
     ctx = get_context(req.user_id, req.session_id)
-    session = await get_chat_session(req.user_id, req.session_id)
+    session = make_session(_ctx_key(req.user_id, req.session_id), engine=_engine, user_id=req.user_id, session_id=req.session_id)
 
     async def _generate() -> AsyncGenerator[dict, None]:
         before_analyses: set[str] = set(ctx.analysis_cache.get("x", {}).keys())
 
         try:
+            # 1. Load history, build full input.
+            history = await session.get_history()
+            full_input = list(history) + [{"role": "user", "content": req.message}]
+            history_len = len(history)
+
+            # 2. Run agent (no session= arg — we manage history manually).
             result = Runner.run_streamed(
                 main_agent,
-                input=req.message,
+                input=full_input,
                 context=ctx,
-                session=session,
             )
 
+            # 3. Stream events.
             async for event in result.stream_events():
                 if event.type == "raw_response_event":
                     if isinstance(event.data, ResponseTextDeltaEvent):
@@ -442,7 +466,25 @@ async def chat(req: ChatRequest):
                                 "data": json.dumps({"tool": tool_name, "status": "running"}),
                             }
 
-            # Emit analysis_result for newly analyzed users and persist them.
+            # 4. Persist new turn (user msg + agent response).
+            all_items = result.to_input_list()
+            new_items = all_items[history_len:]  # slice off prior history
+            await session.save_messages(new_items)
+
+            # Log prompt-cache efficiency (cached_tokens / input_tokens).
+            if result.raw_responses:
+                total_in = sum(r.usage.input_tokens for r in result.raw_responses)
+                cached = sum(
+                    (r.usage.input_tokens_details.cached_tokens or 0)
+                    for r in result.raw_responses
+                )
+                _log.info(
+                    "[cache] input=%d  cached=%d  (%.0f%%)",
+                    total_in, cached,
+                    100 * cached / total_in if total_in else 0,
+                )
+
+            # 5. Emit analysis_result for newly analyzed users and persist them.
             after_analyses: set[str] = set(ctx.analysis_cache.get("x", {}).keys())
             new_users = after_analyses - before_analyses
             for username in new_users:
