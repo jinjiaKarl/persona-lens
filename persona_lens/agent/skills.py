@@ -21,11 +21,13 @@ _USER_DIR = Path.home() / ".persona-lens" / "skills"
 
 def _parse_skill_md(path: Path) -> tuple[str, dict[str, Any], str]:
     """Return (name, frontmatter_dict, body) from a SKILL.md file."""
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
     match = re.match(r"^---\n(.*?)\n---\n?(.*)", text, re.DOTALL)
     if not match:
         return path.parent.name, {}, text
-    meta = yaml.safe_load(match.group(1)) or {}
+    meta = yaml.safe_load(match.group(1))
+    if not isinstance(meta, dict):
+        meta = {}
     body = match.group(2).strip()
     name = meta.get("name") or path.parent.name
     return name, meta, body
@@ -38,8 +40,9 @@ def load_skills(
     user_dir: Path | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Scan directories for SKILL.md files and return registry dict."""
-    builtin_dir = builtin_dir if builtin_dir is not None else _BUILTIN_DIR
-    user_dir = user_dir if user_dir is not None else _USER_DIR
+    if builtin_dir is None:
+        builtin_dir = _BUILTIN_DIR
+    # user_dir=None means skip user directory (no replacement with _USER_DIR here)
 
     registry: dict[str, dict[str, Any]] = {}
 
@@ -59,7 +62,7 @@ def load_skills(
     return registry
 
 
-_SKILLS: dict[str, dict[str, Any]] = load_skills()
+_SKILLS: dict[str, dict[str, Any]] = load_skills(user_dir=_USER_DIR)
 
 
 def _skill_list() -> str:
@@ -87,5 +90,5 @@ Args:
     return skill["body"]
 
 
-# Patch the docstring with the live skill list at import time.
-use_skill.__doc__ = (use_skill.__doc__ or "").format(skill_list=_skill_list())
+# Patch the description with the live skill list at import time.
+use_skill.description = use_skill.description.format(skill_list=_skill_list())
