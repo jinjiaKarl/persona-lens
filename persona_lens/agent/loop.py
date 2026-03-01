@@ -2,7 +2,7 @@
 
 import asyncio
 
-from agents import Agent, Runner, WebSearchTool
+from agents import Agent, ModelSettings, Runner, WebSearchTool
 from agents.extensions.memory import SQLAlchemySession
 from openai.types.responses import ResponseTextDeltaEvent
 from prompt_toolkit import PromptSession
@@ -24,6 +24,7 @@ main_agent = Agent[AgentContext](
     name="Assistant",
     instructions=MAIN_SYSTEM_PROMPT,
     model="gpt-4o",
+    model_settings=ModelSettings(prompt_cache_retention="24h"),
     tools=[WebSearchTool()],
     handoffs=[x_kol_agent],  # Add more platform agents here: linkedin_agent, youtube_agent, ...
 )

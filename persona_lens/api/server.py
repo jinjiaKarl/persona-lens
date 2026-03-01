@@ -1,7 +1,10 @@
 """FastAPI server exposing persona_lens analysis as SSE endpoints."""
 import json
+import logging
 import os
 import time
+
+_log = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 
@@ -453,6 +456,18 @@ async def chat(req: ChatRequest):
             all_items = result.to_input_list()
             new_items = all_items[history_len:]  # slice off prior history
             await session.save_messages(new_items)
+
+            # Log prompt-cache efficiency (cached_tokens / input_tokens).
+            usage = getattr(result, "usage", None)
+            if usage:
+                total_in = getattr(usage, "input_tokens", 0) or 0
+                details = getattr(usage, "input_tokens_details", None)
+                cached = getattr(details, "cached_tokens", 0) or 0
+                _log.info(
+                    "[cache] input=%d  cached=%d  (%.0f%%)",
+                    total_in, cached,
+                    100 * cached / total_in if total_in else 0,
+                )
 
             # 5. Emit analysis_result for newly analyzed users and persist them.
             after_analyses: set[str] = set(ctx.analysis_cache.get("x", {}).keys())

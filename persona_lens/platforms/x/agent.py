@@ -1,7 +1,7 @@
 """X/Twitter platform: fetch_user and analyze_user tools + x_kol_agent."""
 import json
 
-from agents import Agent, RunContextWrapper, function_tool
+from agents import Agent, ModelSettings, RunContextWrapper, function_tool
 from rich.console import Console
 
 from persona_lens.agent.context import AgentContext
@@ -119,5 +119,6 @@ x_kol_agent = Agent[AgentContext](
     handoff_description="Specialist for fetching and analyzing X/Twitter user profiles, posting patterns, and engagement.",
     instructions=KOL_SYSTEM_PROMPT,
     model="gpt-4o",
+    model_settings=ModelSettings(prompt_cache_retention="24h"),
     tools=[fetch_user, analyze_user],
 )
