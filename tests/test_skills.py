@@ -116,3 +116,9 @@ def test_parse_skill_md_non_dict_frontmatter(tmp_path):
     name, meta, body = _parse_skill_md(md)
     assert meta == {}
     assert "Some body." in body
+
+
+def test_use_skill_registered_on_main_agent():
+    from persona_lens.agent.loop import main_agent
+    tool_names = [t.name for t in main_agent.tools]
+    assert "use_skill" in tool_names

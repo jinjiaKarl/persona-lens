@@ -11,6 +11,7 @@ from rich.console import Console
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from persona_lens.agent.context import AgentContext
+from persona_lens.agent.skills import use_skill
 from persona_lens.platforms.x.agent import x_kol_agent
 
 console = Console()
@@ -18,6 +19,7 @@ console = Console()
 MAIN_SYSTEM_PROMPT = """You are a helpful assistant.
 - For general questions, use web_search to find up-to-date information.
 - When the user asks to analyze an X/Twitter account or user, hand off to the KOL Analysis Agent.
+- When the user asks for a report, summary, or formatted output, use use_skill to load the appropriate skill instructions.
 - Always reply in English."""
 
 main_agent = Agent[AgentContext](
@@ -25,7 +27,7 @@ main_agent = Agent[AgentContext](
     instructions=MAIN_SYSTEM_PROMPT,
     model="gpt-4o",
     model_settings=ModelSettings(prompt_cache_retention="24h"),
-    tools=[WebSearchTool()],
+    tools=[WebSearchTool(), use_skill],
     handoffs=[x_kol_agent],  # Add more platform agents here: linkedin_agent, youtube_agent, ...
 )
 
