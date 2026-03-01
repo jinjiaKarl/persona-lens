@@ -47,6 +47,20 @@ _engine = create_async_engine(f"sqlite+aiosqlite:///{DB_PATH}")
 
 
 @app.on_event("startup")
+async def _start_camofox() -> None:
+    import asyncio
+    from persona_lens.utils.docker import ensure_camofox_running
+    await asyncio.to_thread(ensure_camofox_running)
+
+
+@app.on_event("shutdown")
+async def _stop_camofox() -> None:
+    import asyncio
+    from persona_lens.utils.docker import stop_camofox_if_started
+    await asyncio.to_thread(stop_camofox_if_started)
+
+
+@app.on_event("startup")
 async def _create_tables() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
