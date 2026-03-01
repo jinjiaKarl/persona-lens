@@ -7,15 +7,20 @@ description: Compare two or more X/Twitter accounts side-by-side. Use when the u
 
 When multiple accounts have been analyzed, produce a side-by-side comparison:
 
+> If any data field is unavailable, use "N/A".
+
 ---
 
 ## Competitor Analysis
 
 ### Accounts Compared
-List each username with follower count and bio.
+| Username | Followers | Bio |
+|----------|-----------|-----|
+| @username | 12,345 | Bio text here |
+(one row per account)
 
 ### Content Style Comparison
-For each account: 1-2 sentences on tone, vocabulary, format.
+For each account: 1-2 sentences on tone, vocabulary, post structure (threads, one-liners, media-heavy).
 
 ### Products & Focus Areas
 Table: Account | Products | Primary Category
