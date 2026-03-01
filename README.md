@@ -2,18 +2,20 @@
 
 Interactive AI agent for analyzing X (Twitter) KOL (Key Opinion Leader) profiles through conversation.
 
+Available as a **web app** (FastAPI + Next.js) or a **CLI tool**.
+
 ## How it works
 
-1. You start a chat session and ask the agent to analyze any X/Twitter account
+1. Enter an X/Twitter username and click Analyze (or ask the agent directly)
 2. The agent fetches tweets via Nitter using [Camofox Browser](https://github.com/jo-inc/camofox-browser) (anti-detection Firefox automation)
 3. Tweets are parsed into structured data — text, engagement stats, media, timestamps (decoded from Twitter snowflake IDs)
 4. A profile analyzer (GPT-4o) extracts products mentioned, writing style, and engagement insights
-5. You can ask follow-up questions, compare accounts, or request new analyses — all in one session
+5. Ask follow-up questions in the chat panel — the agent reuses cached data without re-fetching
 
 ## Requirements
 
 - Python 3.13+
-- Node.js (for Camofox Browser)
+- Node.js (for Camofox Browser and frontend)
 - `uv` package manager
 - OpenAI API key
 
@@ -47,10 +49,26 @@ uv sync
 
 ```bash
 cp .env.example .env
-# Edit .env and set your OPENAI_API_KEY
+# Edit .env — at minimum set OPENAI_API_KEY
 ```
 
 ## Usage
+
+### Web app (recommended)
+
+```bash
+# Terminal 1 — API server
+uv run uvicorn persona_lens.api.server:app --reload
+
+# Terminal 2 — frontend
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:3000.
+
+### CLI
 
 ```bash
 # Start the interactive agent
@@ -63,8 +81,6 @@ uv run persona-lens --tweets 50
 ### Example session
 
 ```
-KOL Analysis Agent (type 'exit' to quit)
-
 You: Analyze @karpathy and @sama
   → Fetching @karpathy...
   → Analyzing @karpathy...
@@ -75,12 +91,6 @@ Agent: Here's what I found...
 
 You: Which one mentions more AI coding tools?
 Agent: (answers from cached data — no re-fetching)
-
-You: Now analyze @yaborosk
-  → Fetching @yaborosk...
-  → Analyzing @yaborosk...
-
-Agent: ...
 ```
 
 ### What the agent extracts per account
@@ -94,19 +104,39 @@ Agent: ...
 ## Architecture
 
 ```
-agent/cli.py          — Typer CLI entry point
-agent/loop.py         — Interactive agent loop (OpenAI Agents SDK)
-  ├─ fetch_user       — tool: fetch snapshot → parse tweets → compute patterns
-  └─ analyze_user     — tool: run profile analyzer sub-agent
-fetchers/x.py         — Camofox Browser REST API → Nitter page
-fetchers/tweet_parser.py  — snapshot → structured tweets + user info
-fetchers/patterns.py      — tweet timestamps → posting patterns
-analyzers/user_profile_analyzer.py  — GPT-4o sub-agent → products, style, engagement
+persona_lens/
+  agent/
+    cli.py              — Typer CLI entry point
+    loop.py             — Interactive agent loop (OpenAI Agents SDK)
+      ├─ fetch_user     — tool: fetch snapshot → parse → compute patterns
+      └─ analyze_user   — tool: run profile analyzer sub-agent
+  api/
+    server.py           — FastAPI server (SSE streaming, session & profile CRUD)
+    session_backend.py  — Swappable chat-history store (SQLite or acontext)
+  platforms/x/
+    fetcher.py          — Camofox Browser REST API → Nitter page
+    parser.py           — snapshot → structured tweets + user info
+    analyzer.py         — GPT-4o sub-agent → products, style, engagement
+  utils/
+    patterns.py         — tweet timestamps → posting patterns
+
+frontend/
+  app/page.tsx          — main page (analyze + chat layout)
+  components/           — profile card, chat panel, posting heatmap, …
+  hooks/
+    use-analysis.ts     — SSE streaming for /api/analyze
+    use-chat.ts         — SSE streaming for /api/chat, loads history on mount
+    use-session-manager.ts — create / rename / delete sessions
 ```
 
-## Limitations
+## Session backends
 
-**Tweet cap:** Nitter uses Twitter's unauthenticated guest token API, which limits how far back the timeline can be paginated. The exact number varies by Nitter instance and token pool health.
+Chat history can be stored in two backends, toggled via `SESSION_BACKEND`:
+
+| Backend | Storage | Setup |
+|---------|---------|-------|
+| `sqlite` (default) | Local `persona_lens.db` | No extra config |
+| `acontext` | [acontext](https://acontext.app) Sessions API | Requires `ACONTEXT_API_KEY` |
 
 ## Environment variables
 
@@ -114,7 +144,15 @@ analyzers/user_profile_analyzer.py  — GPT-4o sub-agent → products, style, en
 |----------|---------|-------------|
 | `OPENAI_API_KEY` | — | Required |
 | `CAMOFOX_URL` | `http://localhost:9377` | Camofox Browser API URL |
-| `NITTER_INSTANCE` | `https://nitter.net` | Nitter instance to use. If unset, auto-detects from the [LibreRedirect list](https://github.com/libredirect/instances) |
+| `NITTER_INSTANCE` | `https://nitter.net` | Nitter instance. If unset, auto-detects from the [LibreRedirect list](https://github.com/libredirect/instances) |
+| `SESSION_BACKEND` | `sqlite` | Chat history backend: `sqlite` or `acontext` |
+| `ACONTEXT_API_KEY` | — | Required when `SESSION_BACKEND=acontext` |
+| `ACONTEXT_BASE_URL` | hosted default | Optional: self-hosted acontext instance URL |
+| `DB_PATH` | `persona_lens.db` | SQLite database path |
+
+## Limitations
+
+**Tweet cap:** Nitter uses Twitter's unauthenticated guest token API, which limits how far back the timeline can be paginated. The exact number varies by Nitter instance and token pool health.
 
 ## License
 
