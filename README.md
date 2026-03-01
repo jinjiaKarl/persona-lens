@@ -103,6 +103,66 @@ Agent: (answers from cached data — no re-fetching)
 
 ## Architecture
 
+```mermaid
+graph TB
+    subgraph Browser["Browser"]
+        FE["Next.js Frontend :3000\nAnalyze panel · Chat panel · Session list"]
+    end
+
+    subgraph Backend["Python Backend"]
+        API["FastAPI server\n/api/analyze  /api/chat\n/api/users/*/sessions  /api/health"]
+        Runner["OpenAI Agents SDK\nRunner"]
+
+        subgraph Tools["Agent Tools"]
+            FU["fetch_user\n(pure Python)"]
+            AU["analyze_user\n(LLM sub-agent)"]
+        end
+
+        SB["session_backend.py\nChatSession protocol"]
+    end
+
+    subgraph X["platforms/x"]
+        Fetcher["fetcher.py"]
+        Parser["parser.py"]
+        Analyzer["analyzer.py\nGPT-4o sub-agent"]
+    end
+
+    subgraph Storage["Session Storage"]
+        SQLite[("SQLite\npersona_lens.db")]
+        ACtx[("acontext\nSessions API")]
+    end
+
+    subgraph External["External Services"]
+        Camofox["Camofox Browser :9377\n(anti-detect Firefox)"]
+        Nitter["Nitter\n(Twitter proxy)"]
+        OpenAI["OpenAI API\nGPT-4o"]
+    end
+
+    FE -->|"SSE  /api/analyze"| API
+    FE -->|"SSE  /api/chat"| API
+    FE -->|"REST  sessions CRUD"| API
+
+    API --> Runner
+    API --> SB
+    Runner --> FU
+    Runner --> AU
+
+    FU --> Fetcher
+    FU --> Parser
+    AU --> Analyzer
+
+    Fetcher -->|"REST  POST /tabs"| Camofox
+    Camofox -->|"accessibility snapshot"| Fetcher
+    Camofox -->|"headless browse"| Nitter
+
+    Analyzer --> OpenAI
+
+    SB -->|"SESSION_BACKEND=sqlite"| SQLite
+    SB -->|"SESSION_BACKEND=acontext"| ACtx
+```
+
+### File map
+
 ```
 persona_lens/
   agent/
