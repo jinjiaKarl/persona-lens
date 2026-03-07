@@ -6,11 +6,13 @@ Available as a **web app** (FastAPI + Next.js) or a **CLI tool**.
 
 ## How it works
 
-1. Enter an X/Twitter username and click Analyze (or ask the agent directly)
-2. The agent fetches tweets via Nitter using [Camofox Browser](https://github.com/jo-inc/camofox-browser) (anti-detection Firefox automation)
-3. Tweets are parsed into structured data — text, engagement stats, media, timestamps (decoded from Twitter snowflake IDs)
-4. A profile analyzer (GPT-4o) extracts products mentioned, writing style, and engagement insights
-5. Ask follow-up questions in the chat panel — the agent reuses cached data without re-fetching
+1. Enter an X/Twitter username and ask the agent to analyze it (CLI or web)
+2. The **main agent** delegates to the **KOL X Analysis Agent** via handoff
+3. The specialist agent fetches tweets via Nitter using [Camofox Browser](https://github.com/jo-inc/camofox-browser) (anti-detection Firefox automation)
+4. Tweets are parsed into structured data — text, engagement stats, media, timestamps (decoded from Twitter snowflake IDs)
+5. A profile analyzer (GPT-4o) extracts products mentioned, writing style, and engagement insights
+6. Ask follow-up questions — the agent reuses cached data without re-fetching
+7. Request a formatted report with a **skill** (e.g. "give me a KOL report")
 
 ## Requirements
 
@@ -18,26 +20,25 @@ Available as a **web app** (FastAPI + Next.js) or a **CLI tool**.
 - Node.js (for Camofox Browser and frontend)
 - `uv` package manager
 - OpenAI API key
+- Docker (optional — auto-starts Camofox Browser if image is available)
 
 ## Setup
 
-### 1. Start Camofox Browser
+### 1. Build Camofox Browser Docker image
 
 ```bash
 git clone https://github.com/jo-inc/camofox-browser
 cd camofox-browser
-npm install
-npm start
+docker build -t camofox-browser .
+```
+
+The CLI and API server will automatically start/stop the container. Alternatively, run it manually:
+
+```bash
+docker run -p 9377:9377 camofox-browser
 ```
 
 The service starts on port 9377 and downloads Camoufox (~300MB) on first run.
-
-Or use Docker:
-
-```bash
-docker build -t camofox-browser .
-docker run -p 9377:9377 camofox-browser
-```
 
 ### 2. Install persona-lens
 
@@ -57,8 +58,15 @@ cp .env.example .env
 ### Web app (recommended)
 
 ```bash
+# Start both backend and frontend together
+./dev.sh
+```
+
+Or separately:
+
+```bash
 # Terminal 1 — API server
-uv run uvicorn persona_lens.api.server:app --reload
+uv run uvicorn persona_lens.api.server:app --reload --port 8000
 
 # Terminal 2 — frontend
 cd frontend
@@ -91,6 +99,9 @@ Agent: Here's what I found...
 
 You: Which one mentions more AI coding tools?
 Agent: (answers from cached data — no re-fetching)
+
+You: Give me a KOL report
+Agent: (loads kol-report skill and formats a structured report)
 ```
 
 ### What the agent extracts per account
@@ -103,6 +114,8 @@ Agent: (answers from cached data — no re-fetching)
 
 ## Architecture
 
+The system uses a **multi-agent** design: a general-purpose main agent that hands off platform-specific work to specialist agents.
+
 ```mermaid
 graph TB
     subgraph Browser["Browser"]
@@ -113,12 +126,13 @@ graph TB
         API["FastAPI server\n/api/analyze  /api/chat\n/api/users/*/sessions  /api/health"]
         Runner["OpenAI Agents SDK\nRunner"]
 
-        subgraph Tools["Agent Tools"]
-            FU["fetch_user\n(pure Python)"]
-            AU["analyze_user\n(LLM sub-agent)"]
+        subgraph Agents["Agents"]
+            MA["main_agent (Assistant)\nWebSearchTool · use_skill"]
+            XA["x_kol_agent (KOL X Analysis Agent)\nfetch_user · analyze_user"]
         end
 
         SB["session_backend.py\nChatSession protocol"]
+        Skills["skills/\nkol-report · competitor-analysis\n~/.persona-lens/skills/ (user)"]
     end
 
     subgraph X["platforms/x"]
@@ -133,7 +147,7 @@ graph TB
     end
 
     subgraph External["External Services"]
-        Camofox["Camofox Browser :9377\n(anti-detect Firefox)"]
+        Camofox["Camofox Browser :9377\n(anti-detect Firefox)\nauto-started via Docker"]
         Nitter["Nitter\n(Twitter proxy)"]
         OpenAI["OpenAI API\nGPT-4o"]
     end
@@ -144,12 +158,14 @@ graph TB
 
     API --> Runner
     API --> SB
-    Runner --> FU
-    Runner --> AU
+    Runner --> MA
+    MA -->|"handoff"| XA
+    MA -->|"use_skill"| Skills
+    MA -->|"web_search"| OpenAI
 
-    FU --> Fetcher
-    FU --> Parser
-    AU --> Analyzer
+    XA --> Fetcher
+    XA --> Parser
+    XA --> Analyzer
 
     Fetcher -->|"REST  POST /tabs"| Camofox
     Camofox -->|"accessibility snapshot"| Fetcher
@@ -166,19 +182,28 @@ graph TB
 ```
 persona_lens/
   agent/
-    cli.py              — Typer CLI entry point
-    loop.py             — Interactive agent loop (OpenAI Agents SDK)
-      ├─ fetch_user     — tool: fetch snapshot → parse → compute patterns
-      └─ analyze_user   — tool: run profile analyzer sub-agent
+    cli.py              — Typer CLI entry point (auto-manages Camofox Docker)
+    loop.py             — main_agent: general assistant with WebSearchTool,
+                          use_skill, and handoff to x_kol_agent
+    context.py          — AgentContext: platform-neutral profile & analysis cache
+    skills.py           — use_skill tool: loads SKILL.md instructions by name
   api/
-    server.py           — FastAPI server (SSE streaming, session & profile CRUD)
+    server.py           — FastAPI server (SSE streaming, session & profile CRUD,
+                          auto-manages Camofox Docker)
     session_backend.py  — Swappable chat-history store (SQLite or acontext)
-  platforms/x/
-    fetcher.py          — Camofox Browser REST API → Nitter page
-    parser.py           — snapshot → structured tweets + user info
-    analyzer.py         — GPT-4o sub-agent → products, style, engagement
+  platforms/
+    base.py             — PlatformAgent protocol (interface for platform modules)
+    x/
+      agent.py          — x_kol_agent + fetch_user / analyze_user tools
+      fetcher.py        — Camofox Browser REST API → Nitter page
+      parser.py         — snapshot → structured tweets + user info
+      analyzer.py       — GPT-4o sub-agent → products, style, engagement
+  skills/
+    kol-report/         — Built-in skill: structured KOL report format
+    competitor-analysis/— Built-in skill: side-by-side competitor comparison
   utils/
     patterns.py         — tweet timestamps → posting patterns
+    docker.py           — auto start/stop Camofox Browser Docker container
 
 frontend/
   app/page.tsx          — main page (analyze + chat layout)
@@ -187,6 +212,25 @@ frontend/
     use-analysis.ts     — SSE streaming for /api/analyze
     use-chat.ts         — SSE streaming for /api/chat, loads history on mount
     use-session-manager.ts — create / rename / delete sessions
+```
+
+## Skills
+
+Skills are Markdown files that inject specialized output instructions into the agent. The agent loads them on demand via the `use_skill` tool.
+
+**Built-in skills** (`persona_lens/skills/`):
+- `kol-report` — formats a structured KOL profile report
+- `competitor-analysis` — side-by-side comparison of multiple accounts
+
+**Custom skills** — drop a `SKILL.md` into `~/.persona-lens/skills/<skill-name>/` and it becomes available automatically. Format:
+
+```markdown
+---
+name: my-skill
+description: One-line description shown to the agent
+---
+
+Your skill instructions here…
 ```
 
 ## Session backends
